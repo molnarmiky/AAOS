@@ -434,8 +434,10 @@ input[type=range].w { height: 22px; }
     var Ssub = { esp: sE, bms: sB, tmp: sT, ter: sR };
     KEYS.forEach(function (k) { w[k] /= tot; });
     var ds = 0; KEYS.forEach(function (k) { ds += w[k] * Ssub[k]; });
+    // safety cap: good consumption cannot offset hard driving, the total is at most 10 points above the ESP score
+    var dsSum = ds, capped = ds > sE + 10; if (capped) ds = sE + 10;
     var iRaw = 100 * clamp((24 - st.cons) / 14, 0, 1);
-    return { S: Ssub, c: c, w: w, ds: ds, eNorm: eNorm, rawDs: 0.8 * sE + 0.2 * iRaw, act: { tmp: tAct, ter: rAct }, bT: bT, bR: bR, neutral: neutral, d: d, eRegen: eRegen, eRaw: eMeas / d * 100, eW: eWs * n, n: n, perClim: Math.max(0, auxRef - eWs * n) / d * 100, perGrade: Math.max(0, eGrade) / d * 100, perWarm: eWs * n / d * 100, avail: avail };
+    return { S: Ssub, c: c, w: w, ds: ds, dsSum: dsSum, capped: capped, eNorm: eNorm, rawDs: 0.8 * sE + 0.2 * iRaw, act: { tmp: tAct, ter: rAct }, bT: bT, bR: bR, neutral: neutral, d: d, eRegen: eRegen, eRaw: eMeas / d * 100, eW: eWs * n, n: n, perClim: Math.max(0, auxRef - eWs * n) / d * 100, perGrade: Math.max(0, eGrade) / d * 100, perWarm: eWs * n / d * 100, avail: avail };
   }
 
   // ---------- weights: keep sum 100, each >= 1
@@ -535,7 +537,7 @@ input[type=range].w { height: 22px; }
     $("dsRaw").textContent = "v1.0 style without normalisation: " + r.rawDs.toFixed(0) + " (" + (delta >= 0 ? "+" : "−") + Math.abs(delta).toFixed(0) + ")";
     $("wbar").innerHTML = KEYS.map(function (k) { return '<i style="width:' + (r.w[k] * 100).toFixed(2) + '%;background:' + DEF[k].col + '"></i>'; }).join("");
     $("wleg").innerHTML = KEYS.map(function (k) { return '<span><b style="background:' + DEF[k].col + '"></b>' + DEF[k].tag + " " + Math.round(r.w[k] * 100) + "%</span>"; }).join("");
-    $("eq").textContent = "Score = " + KEYS.map(function (k) { return r.w[k].toFixed(2) + "×" + r.S[k].toFixed(0); }).join(" + ") + " = " + r.ds.toFixed(1);
+    $("eq").textContent = "Score = " + KEYS.map(function (k) { return r.w[k].toFixed(2) + "×" + r.S[k].toFixed(0); }).join(" + ") + " = " + r.dsSum.toFixed(1) + (r.capped ? ", capped at ESP + 10 = " + r.ds.toFixed(1) : "");
 
     // per-card results
     var e = r.eNorm;

@@ -55,6 +55,7 @@ def band_weight(ac, f=1.0):
 BASE_W = {"ESP": 60.0, "BMS": 20.0, "TMP": 10.0, "TER": 10.0}
 FLOOR = 0.2
 E_BEST, E_WORST = 10.0, 24.0         # kWh/100km normalised: 100 pts / 0 pts
+ESP_CAP_MARGIN = 10.0                 # safety cap: the Drive Score is at most this many points above the ESP score
 E_NORM_MIN = 3.0                      # floor of the normalised consumption (inconsistent inputs cannot give a negative value)
 TMP_FULL_K, TMP_FULL_H = 3.0, 0.5     # climate demand (K) and steady driving time (h) at which the temperature sub-score counts fully
 CLIMATE_FULL_K = 10.0                 # climate demand at which the temperature input counts fully
@@ -138,12 +139,14 @@ def score(a, have=("ESP", "BMS", "TMP", "TER"), params=None):
          "BMS": s_bms if s_bms is not None else neutral,
          "TMP": neutral if s_tmp is None else neutral + b_t * (s_tmp - neutral),
          "TER": neutral if s_ter is None else neutral + b_r * (s_ter - neutral)}
-    ds = sum(w[k] * S[k] for k in w)
+    ds_sum = sum(w[k] * S[k] for k in w)
+    cap = (s_esp + ESP_CAP_MARGIN) if s_esp is not None else None   # good consumption cannot offset hard driving
+    ds = min(ds_sum, cap) if cap is not None else ds_sum
     raw_score = None
     if s_esp is not None and e_raw is not None:      # v1.0-style: no normalisation
         i_raw = 100.0 * clamp((E_WORST - e_raw) / (E_WORST - E_BEST), 0, 1)
         raw_score = 0.8 * s_esp + 0.2 * i_raw
-    return dict(S=S, w=w, c=c, drive_score=ds, e_norm=e_norm, e_raw=e_raw,
+    return dict(S=S, w=w, c=c, drive_score=ds, ds_sum=ds_sum, capped=(cap is not None and ds_sum > cap), e_norm=e_norm, e_raw=e_raw,
                 raw_score=raw_score,
                 raw_ie=(100.0 * clamp((E_WORST - e_raw) / (E_WORST - E_BEST), 0, 1) if e_raw else None))
 
@@ -404,6 +407,13 @@ def run():
         if prev is not None: jump = max(jump, abs(v - prev))
         prev = v
     check("T21 no jump when descent grows from 0 to 60 m (step <= 0.6 pts per metre)", jump <= 0.6, f"max step {jump:.2f} pts")
+    # T24 ESP safety cap: good consumption cannot offset hard driving
+    sp = aggregate(simulate("Normal", "mild-flat")); sp = {k: (v * 10 if k != "temp_c" else v) for k, v in sp.items()}
+    sp["dv_weighted"] = 0.40 * sp["dv_total"]; sp["e_meas_kwh"] = 10.0 * sp["dist_km"] / 100.0 + (sp["e_aux_kwh"] - p_aux(20.0) * sp["dur_s"] / 3600.0)   # 100 km, ESP 40, excellent consumption
+    rs = score(sp)
+    check("T24 ESP safety cap: with ESP 40 and excellent consumption the total is held at ESP + 10", rs["capped"] and abs(rs["drive_score"] - 50.0) < 1e-6 and rs["ds_sum"] > 50.0,
+          f"sum {rs['ds_sum']:.1f} -> capped {rs['drive_score']:.1f}")
+    check("T24b the cap does not touch the 15 simulated trips (their total is already below ESP + 10)", not any(r["capped"] for _, _, r in grid.values()))
     # T22 rating follows the rounded score
     check("T22 rating thresholds apply to the rounded score (89.9 -> 90 Excellent, 79.6 -> 80 Good, 59.5 -> 60 Balanced)",
           rating(89.9) == "Excellent" and rating(79.6) == "Good" and rating(59.5) == "Balanced" and rating(59.4) == "Needs Improvement")
