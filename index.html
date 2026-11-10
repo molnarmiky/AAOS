@@ -577,9 +577,10 @@ input[type=range].w { height: 22px; }
       if (r.perWarm >= 0.5) l.push(eV(r.perWarm).toFixed(1) + " for warm-up");
       return l.length ? ", of which " + l.join(", ") : "";
     }
-    var bmsTip = "Consumption is high for these conditions (" + cnd() + "): measured " + eTxt(r.eRaw) + parts() + ". " +
-      (r.eNorm > 14 ? "After removing what the conditions cost, " + eTxt(r.eNorm) + " remains, so the driving itself adds energy. Keep speed steadier and anticipate traffic."
-                    : "After removing that, " + eTxt(r.eNorm) + " remains, which is good: the load comes from the conditions, not your driving." + (cold || hot ? " Pre-" + (cold ? "heat" : "cool") + " the cabin while plugged in." : ""));
+    var cl = [];
+    if (cold || hot) cl.push("temperature"); if (hilly) cl.push("terrain"); if (r.perWarm >= 1) cl.push("short-trip");
+    var bmsTip = cl.length ? "Consumption is high for these " + (cl.length > 1 ? cl.slice(0, -1).join(", ") + " and " + cl[cl.length - 1] : cl[0]) + " conditions."
+                           : "Consumption is high. Keep speed steadier and anticipate traffic.";
     var tips = {
       esp: "Smoother acceleration and braking moves more manoeuvres into the ECO band" + (cf < 1 ? ". With " + cnd() + " the ECO limit is " + (0.10 * cf).toFixed(2) + " g instead of 0.10 g, so ease off earlier than on a dry, flat road." : "."),
       bms: bmsTip,
