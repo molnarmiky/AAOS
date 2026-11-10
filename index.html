@@ -7,6 +7,7 @@
 <meta name="description" content="Driving Insights formula simulator: ESP acceleration, BMS consumption, temperature and terrain with adjustable weights.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b63ff'/%3E%3Cpath d='M6 22a10 10 0 1 1 20 0' fill='none' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3Cpath d='M16 22l5-8' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
 <title>Driving Insights Simulator</title>
+<meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
@@ -190,8 +191,7 @@ input[type=range].w { height: 22px; }
 }
 @media (prefers-reduced-motion: reduce) { .wbar i { transition: none; } }
 </style>
-</head>
-<body>
+
 <div class="status">
   <span class="num">10:24</span>
   <span class="r"><span>5G</span><span class="num" id="topTemp">20°C</span></span>
@@ -251,6 +251,7 @@ input[type=range].w { height: 22px; }
       <button class="chip" data-sc="2">Normal · cold, hilly</button>
       <button class="chip" data-sc="3">Sporty · mild, hilly</button>
             <button class="chip" data-sc="4">Aggressive · mild, hilly</button>
+            <button class="chip" data-sc="5">Normal · hot, flat</button>
       <button class="chip" id="resetW">Reset weights 60 · 20 · 10 · 10</button>
     </div>
 
@@ -282,7 +283,7 @@ input[type=range].w { height: 22px; }
         <label class="sw" for="x-conf"><span>Scale weights by data confidence, as in the validation script (off: weights apply exactly as set)</span><input type="checkbox" id="x-conf"></label>
       </div>
     </details>
-    <p class="note">Sub-scores follow the 10 km validation script. Speed is taken as 50 km/h average, vehicle 1950 kg, climb equals descent. Each cold start adds warm-up energy (up to 1.4 kWh at -10 °C) that the score removes; the longer windows count one cold start per average trip. The ESP slider is the typical peak acceleration of a manoeuvre; the sub-score interpolates the ECO, Normal, Sporty and Aggressive band values.</p>
+    <p class="note">Sub-scores follow the 10 km validation script. Speed is taken as 50 km/h average, vehicle 1950 kg, climb equals descent. Heating or cooling is counted from the 20 °C zero point (nothing inside 17 to 23 °C). Each start adds warm-up energy (about 1.4 kWh at -10 °C, 0.4 kWh at 35 °C) that the score removes; the longer windows count one cold start per average trip. The ESP slider is the typical peak acceleration of a manoeuvre; the sub-score interpolates the ECO, Normal, Sporty and Aggressive band values.</p>
         </div>
   </section>
 
@@ -328,9 +329,11 @@ input[type=range].w { height: 22px; }
   var lerp = function (t, a, b) { return a + (b - a) * t; };
   var M = 1950, G = 9.81, ETA = 0.88, SPEED = 50;
 
-  function eWarm(T) { return lerp(clamp((20 - T) / 30, 0, 1), 0.15, 1.40); }  // kWh per cold start: cabin + battery warm-up
+  // 20 °C is the zero point: inside +-3 K nothing needs heating or cooling.
+  function climateK(T) { return Math.max(0, Math.abs(T - 20) - 3); }                 // climate demand in kelvin
+  function eWarm(T) { return (T < 20 ? 0.052 : 0.022) * climateK(T); }               // kWh per start: heat-up (cold) or pull-down (hot)
   var ZONE_KM = 3;  // first km of every trip left out of the climate-use ratio
-  function pAux(T) { return T >= 20 ? 0.6 + 0.05 * (T - 20) : lerp(clamp((20 - T) / 30, 0, 1), 0.6, 2.2); }
+  function pAux(T) { return 0.6 + (T < 20 ? 0.060 : 0.050) * climateK(T); }          // kW: base load + heating or cooling
   function fT(T) { return lerp(clamp((10 - T) / 20, 0, 1), 1.0, 1.10); }
   function etaR(T) { return lerp(clamp((10 - T) / 20, 0, 1), 0.75, 0.45); }
 
@@ -362,17 +365,18 @@ input[type=range].w { height: 22px; }
   };
 
   var S = {
-    acc: 0.15, cons: 16.9, temp: 20, hill: 0,
+    acc: 0.15, cons: 15.4, temp: 20, hill: 0,
     dist: 10, trip: 20, cap: 0.55, kappa: 1.0, conf: false,
     W: { esp: 60, bms: 20, tmp: 10, ter: 10 },
     tab: "trip", ltab: "formula"
   };
   var SCEN = [
-    { acc: 0.07, cons: 12.7, temp: 20, hill: 0, cap: 0.80, kappa: 0.85 },
-    { acc: 0.07, cons: 34.2, temp: -5, hill: 14, cap: 0.80, kappa: 0.85 },
-    { acc: 0.15, cons: 40.2, temp: -5, hill: 14, cap: 0.55, kappa: 1.00 },
-    { acc: 0.24, cons: 28.0, temp: 20, hill: 14, cap: 0.43, kappa: 1.02 },
-    { acc: 0.30, cons: 33.7, temp: 20, hill: 14, cap: 0.30, kappa: 1.05 }
+    { acc: 0.07, cons: 11.2, temp: 20, hill: 0, cap: 0.80, kappa: 0.85 },
+    { acc: 0.07, cons: 33.7, temp: -5, hill: 14, cap: 0.80, kappa: 0.85 },
+    { acc: 0.15, cons: 39.6, temp: -5, hill: 14, cap: 0.55, kappa: 1.00 },
+    { acc: 0.24, cons: 27.0, temp: 20, hill: 14, cap: 0.43, kappa: 1.02 },
+    { acc: 0.30, cons: 32.2, temp: 20, hill: 14, cap: 0.30, kappa: 1.05 },
+    { acc: 0.15, cons: 19.5, temp: 35, hill: 0, cap: 0.55, kappa: 1.00 }
   ];
 
   function compute(st, d, n) {
@@ -394,8 +398,7 @@ input[type=range].w { height: 22px; }
     var eNorm = (eMeas - auxExc - eGrade) / d * 100 / fT(T);
     var sB = 100 * clamp((24 - eNorm) / 14, 0, 1);
     // Temperature
-    var dev = Math.abs(pAux(T) - pAux(20)) * th / d * 100;
-    var tAct = dev >= 0.3 && eAux > 0 && tRun > 0;
+    var tAct = climateK(T) > 0 && eAux > 0 && tRun > 0;
     var kappa = tAct ? st.kappa * pAux(T) * tRun / (pAux(T) * tRun) : 1;
     var sT = tAct ? clamp(75 - 250 * (kappa - 1), 0, 100) : 75;
     // Terrain
@@ -403,7 +406,7 @@ input[type=range].w { height: 22px; }
     var avail = M * G * ETA * etaR(T) * h / 3.6e6;
     var sR = rAct && avail > 0 ? clamp(100 * (eRegen / avail) / 0.8, 0, 100) : 70;
     var Ssub = { esp: sE, bms: sB, tmp: sT, ter: sR };
-    var c = { esp: 1, bms: clamp(d / 30, 0.2, 1), tmp: tAct ? clamp(tRun / 0.5, 0.2, 1) : 0.2, ter: rAct ? 0.8 : 0.2 };
+    var c = { esp: 1, bms: clamp(d / 30, 0.2, 1), tmp: tAct ? clamp(climateK(T) / 10 * Math.min(1, tRun / 0.5), 0.2, 1) : 0.2, ter: rAct ? 0.8 : 0.2 };
     var w = {}, tot = 0;
     KEYS.forEach(function (k) { w[k] = st.W[k] * (st.conf ? c[k] : 1); tot += w[k]; });
     KEYS.forEach(function (k) { w[k] /= tot; });
@@ -440,7 +443,7 @@ input[type=range].w { height: 22px; }
   var DESC = {
     esp: "Typical peak acceleration of a manoeuvre, from the ESP accelerometer.",
     bms: "Measured consumption of this trip, including the energy to warm up the cabin and battery at the start.",
-    tmp: "Outside temperature from the vehicle sensor.",
+    tmp: "Outside temperature. 20 °C is the zero point: from 17 to 23 °C no heating or cooling is needed and the input has almost no weight.",
     ter: "Climb per km along the route (descent equals climb). 10 m/km is about 1% average grade."
   };
   var SCALE = {
@@ -507,7 +510,7 @@ input[type=range].w { height: 22px; }
     var e = r.eNorm;
     $("res-esp").innerHTML = '<span>Sub-score <b class="num">' + r.S.esp.toFixed(0) + '</b></span><span>Weight <b class="num">' + S.W.esp + '% → ' + (r.w.esp * 100).toFixed(0) + '%</b></span><span>Adds <b class="num">' + pts(r.w.esp * r.S.esp) + ' pts</b></span>';
     $("res-bms").innerHTML = '<span>Normalised <b class="num">' + e.toFixed(1) + ' kWh/100 km</b></span><span>Sub-score <b class="num">' + r.S.bms.toFixed(0) + '</b></span><span>Weight <b class="num">' + S.W.bms + '% → ' + (r.w.bms * 100).toFixed(0) + '%</b></span><span>Adds <b class="num">' + pts(r.w.bms * r.S.bms) + ' pts</b></span><span>Warm-up in this trip <b class="num">' + r.eW.toFixed(2) + ' kWh (' + (r.eW / S.dist * 100).toFixed(1) + ' per 100 km)</b></span><span class="st ' + (r.c.bms >= 1 ? "on" : "off") + '">confidence ' + Math.round(r.c.bms * 100) + '% at ' + S.dist + ' km</span>';
-    $("res-tmp").innerHTML = '<span class="st ' + (r.act.tmp ? "on" : "off") + '">' + (r.act.tmp ? "Active" : "Neutral, little climate load") + '</span><span>Sub-score <b class="num">' + r.S.tmp.toFixed(0) + '</b></span><span>Weight <b class="num">' + S.W.tmp + '% → ' + (r.w.tmp * 100).toFixed(0) + '%</b></span><span>Adds <b class="num">' + pts(r.w.tmp * r.S.tmp) + ' pts</b></span>';
+    $("res-tmp").innerHTML = '<span class="st ' + (r.act.tmp ? "on" : "off") + '">' + (r.act.tmp ? "Active, " + climateK(S.temp).toFixed(0) + " K beyond comfort zone" : "Neutral, comfort zone 17 to 23 °C") + '</span><span>Sub-score <b class="num">' + r.S.tmp.toFixed(0) + '</b></span><span>Weight <b class="num">' + S.W.tmp + '% → ' + (r.w.tmp * 100).toFixed(0) + '%</b></span><span>Adds <b class="num">' + pts(r.w.tmp * r.S.tmp) + ' pts</b></span>';
     $("res-ter").innerHTML = '<span class="st ' + (r.act.ter ? "on" : "off") + '">' + (r.act.ter ? "Active" : "Neutral, under 30 m of descent") + '</span><span>Sub-score <b class="num">' + r.S.ter.toFixed(0) + '</b></span><span>Weight <b class="num">' + S.W.ter + '% → ' + (r.w.ter * 100).toFixed(0) + '%</b></span><span>Adds <b class="num">' + pts(r.w.ter * r.S.ter) + ' pts</b></span>';
 
     renderWindow();
@@ -578,5 +581,3 @@ input[type=range].w { height: 22px; }
   render();
 })();
 </script>
-</body>
-</html>

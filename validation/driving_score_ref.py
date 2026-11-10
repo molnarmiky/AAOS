@@ -20,9 +20,13 @@ ETA_T = 0.88
 def clamp(x, lo, hi): return max(lo, min(hi, x))
 def lerp(t, a, b): return a + (b - a) * t
 
-def p_aux(T):            # kW, cabin heating/cooling + base load
-    if T >= 20: return 0.6 + 0.05 * (T - 20)
-    return lerp(clamp((20 - T) / 30.0, 0, 1), 0.6, 2.2)
+COMFORT_C, COMFORT_BAND = 20.0, 3.0     # 20 C is the zero point: no heating or cooling is needed within +-3 K
+
+def climate_k(T):        # climate demand in kelvin: distance from the comfort zone, 0 inside 17..23 C
+    return max(0.0, abs(T - COMFORT_C) - COMFORT_BAND)
+
+def p_aux(T):            # kW, base load + heating (below 20 C) or cooling (above 20 C) power
+    return 0.6 + (0.060 if T < COMFORT_C else 0.050) * climate_k(T)
 
 def f_T(T):              # cold-driveline factor on traction energy
     return lerp(clamp((10 - T) / 20.0, 0, 1), 1.0, 1.10)
@@ -30,8 +34,8 @@ def f_T(T):              # cold-driveline factor on traction energy
 def eta_r(T):            # regen round-trip efficiency vs battery temperature
     return lerp(clamp((10 - T) / 20.0, 0, 1), 0.75, 0.45)
 
-def e_warm(T):           # kWh once per trip start: cabin pull-down/heat-up and battery conditioning (non-traction)
-    return lerp(clamp((20 - T) / 30.0, 0, 1), 0.15, 1.40)
+def e_warm(T):           # kWh once per trip start: cabin heat-up (cold) or pull-down (hot), battery conditioning
+    return (0.052 if T < COMFORT_C else 0.022) * climate_k(T)
 
 def crr(T):
     return lerp(clamp((10 - T) / 20.0, 0, 1), 0.009, 0.0105)
@@ -47,7 +51,7 @@ BASE_W = {"ESP": 60.0, "BMS": 20.0, "TMP": 10.0, "TER": 10.0}
 FLOOR = 0.2
 E_BEST, E_WORST = 10.0, 24.0         # kWh/100km normalised: 100 pts / 0 pts
 NEUTRAL = {"TMP": 75.0, "TER": 70.0}
-TEMP_ACTIVE_KWH100 = 0.3
+CLIMATE_FULL_K = 10.0                 # climate demand at which the temperature input counts fully
 TER_ACTIVE_DOWN_M = 30.0
 WARM_ZONE_KM = 3                      # km at the start of every trip excluded from the climate-use ratio
 CAPTURE_REF = 0.8
@@ -100,9 +104,7 @@ def score(a, have=("ESP", "BMS", "TMP", "TER"), params=None):
     # The first WARM_ZONE_KM of every trip (cabin and battery warm-up) are left out of this ratio.
     t_active = False; s_tmp = NEUTRAL["TMP"]; t_run = (a["dur_run_s"] or 0.0) / 3600.0
     if "TMP" in have and T is not None:
-        t_h = a["dur_s"] / 3600.0
-        dev = abs(p["aux"] * (p_aux(T) - p_aux(20.0))) * t_h / d * 100.0
-        t_active = dev >= TEMP_ACTIVE_KWH100 and a["e_aux_kwh"] > 0 and t_run > 0
+        t_active = climate_k(T) > 0 and a["e_aux_kwh"] > 0 and t_run > 0
         if t_active:
             kappa = a["e_aux_run_kwh"] / (p["aux"] * p_aux(T) * t_run)
             s_tmp = clamp(75.0 - 250.0 * (kappa - 1.0), 0, 100)
@@ -117,7 +119,7 @@ def score(a, have=("ESP", "BMS", "TMP", "TER"), params=None):
     c = {"ESP": 1.0 if s_esp is not None else FLOOR,
          "BMS": clamp(d / 30.0, FLOOR, 1.0) if s_bms is not None else FLOOR,
          # climate-use score needs enough steady driving time (warm-up dominates short trips): full at 30 min
-         "TMP": clamp(t_run / 0.5, FLOOR, 1.0) if t_active else FLOOR,
+         "TMP": clamp(climate_k(T) / CLIMATE_FULL_K * min(1.0, t_run / 0.5), FLOOR, 1.0) if t_active else FLOOR,
          "TER": (0.8 if r_active else FLOOR)}
     raw_w = {k: BASE_W[k] * c[k] for k in BASE_W}
     tot = sum(raw_w.values())
@@ -148,6 +150,7 @@ CONDITIONS = {
     "mild-hilly": dict(T=20.0, up=[22,8,25,5,20,6,24,4,18,7], down=[4,20,6,24,5,22,3,25,6,20]),
     "cold-flat":  dict(T=-5.0, up=[0]*10, down=[0]*10),
     "cold-hilly": dict(T=-5.0, up=[22,8,25,5,20,6,24,4,18,7], down=[4,20,6,24,5,22,3,25,6,20]),
+    "hot-flat":   dict(T=35.0, up=[0]*10, down=[0]*10),
 }
 EDGES = [(0.04, 0.10), (0.10, 0.20), (0.20, 0.30), (0.30, 0.45)]
 
@@ -248,7 +251,7 @@ def run():
 
     # T1 all weights > 0
     minw = min(min(r["w"].values()) for _, _, r in grid.values())
-    check("T1 every weight > 0 in all 12 trips", minw > 0, f"min weight {minw:.3f}")
+    check("T1 every weight > 0 in all 15 trips", minw > 0, f"min weight {minw:.3f}")
     # T2 weights sum to 1
     check("T2 weights sum to 1", all(abs(sum(r["w"].values()) - 1) < 1e-9 for _, _, r in grid.values()))
     # T3 S_ESP independent of conditions
@@ -325,6 +328,29 @@ def run():
     check("T13 normalised consumption is the same for a 10 km trip and a 200 km trip (warm-up removed)", maxnorm < 0.15, f"max difference {maxnorm:.2f} kWh/100 km")
     check("T14 200 km as one trip and as 20 short trips give the same Drive Score (<= 1 pt)", maxsame <= 1.0, f"max difference {maxsame:.2f} pts")
     check("T15 10 km versus 200 km Drive Score differs <= 6 pts (only the weights move with data volume)", maxd10 <= 6.0, f"max difference {maxd10:.1f} pts")
+    # T16-T18 temperature: 20 C is the zero point, no heating or cooling is needed inside +-3 K
+    def flat(pf, T, total=10, trip=10):
+        key = f"T{T}"; CONDITIONS[key] = dict(T=float(T), up=[0] * 10, down=[0] * 10)
+        try:
+            bs = simulate(pf, key) if total == 10 else window(pf, key, total, trip)
+            return score(aggregate(bs))
+        finally:
+            del CONDITIONS[key]
+    base = flat("Normal", 20)
+    inband = [flat("Normal", t) for t in (17, 18, 22, 23)]
+    dcons = max(abs(r["e_raw"] - base["e_raw"]) for r in inband)
+    dscore = max(abs(r["drive_score"] - base["drive_score"]) for r in inband)
+    check("T16 inside the comfort zone (17 to 23 C) temperature has no effect on measured consumption or score",
+          dcons < 0.35 and dscore < 0.5, f"max change {dcons:.2f} kWh/100 km, {dscore:.2f} pts")
+    check("T16b temperature weight stays at its minimum inside the comfort zone",
+          all(r["w"]["TMP"] <= base["w"]["TMP"] + 1e-9 for r in inband), f"{base['w']['TMP']*100:.1f} %")
+    cold, hot = flat("Normal", -5), flat("Normal", 35)
+    check("T17 heating (-5 C) and cooling (35 C) both raise measured consumption by >= 15 % versus 20 C",
+          cold["e_raw"] >= 1.15 * base["e_raw"] and hot["e_raw"] >= 1.15 * base["e_raw"],
+          f"20 C {base['e_raw']:.1f}, -5 C {cold['e_raw']:.1f}, 35 C {hot['e_raw']:.1f} kWh/100 km")
+    check("T17b ... but the Drive Score moves <= 3 pts",
+          max(abs(cold["drive_score"] - base["drive_score"]), abs(hot["drive_score"] - base["drive_score"])) <= 3.0,
+          f"20 C {base['drive_score']:.1f}, -5 C {cold['drive_score']:.1f}, 35 C {hot['drive_score']:.1f}")
     return grid
 
 def export(grid):
