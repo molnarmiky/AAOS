@@ -42,9 +42,14 @@ def crr(T):
 
 # ------------------------------------------------------------------ 2. scoring (port this to Kotlin)
 BANDS = [(0.10, 1.0), (0.20, 0.8), (0.30, 0.45), (9.9, 0.0)]   # peak a_c upper edge, weight
-def band_weight(ac):
+# Context factor: the same peak force is riskier in the cold (less grip) and on a slope, so the band edges shrink.
+CTX_COLD_REF_C, CTX_COLD_PER_K, CTX_GRADE_PER_PCT, CTX_MIN = 5.0, 0.010, 0.020, 0.70
+def ctx_factor(T, grade_pct):
+    """T in C, grade_pct = (climb + descent) per km / 10, i.e. average absolute grade of the km in percent."""
+    return clamp(1.0 - CTX_COLD_PER_K * max(0.0, CTX_COLD_REF_C - T) - CTX_GRADE_PER_PCT * grade_pct, CTX_MIN, 1.0)
+def band_weight(ac, f=1.0):
     for edge, w in BANDS:
-        if ac < edge: return w
+        if ac < edge * f: return w
     return 0.0
 
 BASE_W = {"ESP": 60.0, "BMS": 20.0, "TMP": 10.0, "TER": 10.0}
@@ -165,13 +170,14 @@ def add_warmup(bs, T):
 
 def simulate(profile, cond, seed=7, warm=True):
     pr, co = PROFILES[profile], CONDITIONS[cond]
-    # maneuvers: own RNG, independent of conditions -> S_ESP identical across conditions
+    # maneuvers: own RNG, independent of conditions -> same driver, same peak forces; the band edges depend on context
     rm = random.Random(f"{seed}-{profile}-man")
     rn = random.Random(f"{seed}-{profile}-{cond}-noise")
     T = co["T"]
     buckets = []
     for k in range(10):
         v = pr["v"] * (1 + rm.uniform(-0.08, 0.08)) / 3.6       # m/s
+        f_ctx = ctx_factor(T, (co["up"][k] + co["down"][k]) / 10.0)
         dv_tot = dv_w = 0.0
         e_kin_acc = e_kin_brk = 0.0
         for ev in range(pr["n"]):
@@ -180,7 +186,7 @@ def simulate(profile, cond, seed=7, warm=True):
                 lo, hi = EDGES[bi]; ac = rm.uniform(lo, hi)
                 dv = rm.uniform(4, 11) * (1.0 + 0.3 * bi) / 3.6   # m/s, harder manoeuvres change more speed
                 dv = min(dv, v * 0.9)
-                dv_tot += dv; dv_w += dv * band_weight(ac)
+                dv_tot += dv; dv_w += dv * band_weight(ac, f_ctx)
                 ke = 0.5 * M * (v ** 2 - (v - dv) ** 2)
                 if kind == "acc":
                     e_kin_acc += ke / (ETA_T - 0.10 * ac / 0.3)   # high-power inefficiency
@@ -255,9 +261,12 @@ def run():
     # T2 weights sum to 1
     check("T2 weights sum to 1", all(abs(sum(r["w"].values()) - 1) < 1e-9 for _, _, r in grid.values()))
     # T3 S_ESP independent of conditions
-    ok = all(abs(grid[(pf, "mild-flat")][2]["S"]["ESP"] - grid[(pf, cd)][2]["S"]["ESP"]) < 1e-9
-             for pf in PROFILES for cd in CONDITIONS)
-    check("T3 S_ESP identical across conditions (same driver, same manoeuvres)", ok)
+    ok = all(abs(grid[(pf, "mild-flat")][2]["S"]["ESP"] - grid[(pf, "hot-flat")][2]["S"]["ESP"]) < 1e-9 for pf in PROFILES)
+    check("T3 S_ESP identical for the same driver when neither cold nor slope is present (20 C versus 35 C, flat)", ok)
+    ok = all(grid[(pf, "cold-hilly")][2]["S"]["ESP"] < grid[(pf, "cold-flat")][2]["S"]["ESP"] < grid[(pf, "mild-flat")][2]["S"]["ESP"]
+             and grid[(pf, "cold-hilly")][2]["S"]["ESP"] < grid[(pf, "mild-hilly")][2]["S"]["ESP"] < grid[(pf, "mild-flat")][2]["S"]["ESP"]
+             for pf in PROFILES)
+    check("T3b S_ESP is context-aware: the same manoeuvres score lower in the cold and on slopes (cold-hilly lowest)", ok)
     # T4 ordering Eco > Normal > Aggressive in every condition
     ok = all(grid[("Eco", cd)][2]["drive_score"] > grid[("Normal", cd)][2]["drive_score"] > grid[("Aggressive", cd)][2]["drive_score"]
              for cd in CONDITIONS)
@@ -271,8 +280,8 @@ def run():
         sp = lambda x: max(x) - min(x)
         check(f"T5 {pf}: consumption spread across the 4 conditions shrinks after normalisation (kWh/100 km)",
               sp(e_nrm) < 0.5 * sp(e_raw), f"raw {sp(e_raw):.1f} -> normalised {sp(e_nrm):.1f}")
-        check(f"T5 {pf}: Drive Score spread across conditions <= 6 pts (same driver)",
-              sp(ds) <= 6.0, f"v1.0-style raw score {sp(rs):.1f} pts -> Drive Score {sp(ds):.1f} pts")
+        check(f"T5 {pf}: Drive Score spread across conditions <= 12 pts (same driver, bounded context effect)",
+              sp(ds) <= 12.0, f"v1.0-style raw score {sp(rs):.1f} pts -> Drive Score {sp(ds):.1f} pts")
     # T6 additivity: merging two 5 km halves equals the 10 km window
     bs = grid[("Normal", "cold-hilly")][0]
     a_all = aggregate(bs); a_split = aggregate(bs[:5]); a_b = aggregate(bs[5:])
@@ -348,9 +357,16 @@ def run():
     check("T17 heating (-5 C) and cooling (35 C) both raise measured consumption by >= 15 % versus 20 C",
           cold["e_raw"] >= 1.15 * base["e_raw"] and hot["e_raw"] >= 1.15 * base["e_raw"],
           f"20 C {base['e_raw']:.1f}, -5 C {cold['e_raw']:.1f}, 35 C {hot['e_raw']:.1f} kWh/100 km")
-    check("T17b ... but the Drive Score moves <= 3 pts",
-          max(abs(cold["drive_score"] - base["drive_score"]), abs(hot["drive_score"] - base["drive_score"])) <= 3.0,
+    dc, dh = base["drive_score"] - cold["drive_score"], abs(hot["drive_score"] - base["drive_score"])
+    check("T17b cooling (35 C) leaves the score within 3 pts; heating weather (-5 C) lowers it by 1 to 12 pts (grip context)",
+          dh <= 3.0 and 1.0 <= dc <= 12.0,
           f"20 C {base['drive_score']:.1f}, -5 C {cold['drive_score']:.1f}, 35 C {hot['drive_score']:.1f}")
+    # T18 context factor bounds and monotonicity
+    fs = [ctx_factor(t, g) for t in (-20, -5, 5, 20, 35) for g in (0, 1, 3, 6)]
+    check("T18 context factor stays within 0.70 to 1.00, equals 1.00 at 5 C and above on flat roads, and never rises with worse conditions",
+          all(CTX_MIN <= f <= 1.0 for f in fs) and ctx_factor(5, 0) == 1.0 and ctx_factor(35, 0) == 1.0
+          and ctx_factor(-5, 3) < ctx_factor(-5, 0) < ctx_factor(5, 0) and ctx_factor(5, 3) < ctx_factor(5, 0),
+          f"cold-hilly {ctx_factor(-5, 2.8):.3f}")
     return grid
 
 def export(grid):

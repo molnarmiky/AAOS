@@ -369,6 +369,8 @@ input[type=range].w { height: 22px; }
     for (var i = 0; i < 3; i++) if (a < m[i + 1]) { var t = (a - m[i]) / 0.10; o[i] = 1 - t; o[i + 1] = t; return o; }
     return o;
   }
+  // Context factor: the same peak force is riskier in the cold (less grip) and on a slope, so the band edges shrink.
+  function ctxF(T, hill) { return clamp(1 - 0.010 * Math.max(0, 5 - T) - 0.020 * (hill / 5), 0.70, 1); }   // hill m/km climb = descent, grade % = hill / 5
   function bandOf(a) { return a < 0.10 ? "ECO" : a < 0.20 ? "Normal" : a < 0.30 ? "Sporty" : "Aggressive"; }
   function ratingOf(s) { return s >= 90 ? "Excellent" : s >= 80 ? "Good" : s >= 60 ? "Balanced" : "Needs Improvement"; }
   function ratingColor(s) { return s >= 90 ? "var(--good)" : s >= 80 ? "var(--c-esp)" : s >= 60 ? "var(--warn)" : "var(--bad)"; }
@@ -407,7 +409,7 @@ input[type=range].w { height: 22px; }
     var eAux = st.kappa * pAux(T) * th + eW * n;
     var h = st.hill * d;
     var eRegen = st.cap * M * G * ETA * etaR(T) * h / 3.6e6;
-    var sE = sEsp(st.acc);
+    var sE = sEsp(st.acc / ctxF(st.temp, st.hill));
     // BMS: remove climate extra and grade energy, divide by cold factor
     var auxExc = eAux - pAux(20) * th;
     var eRec = eRegen > 0 ? eRegen : M * G * ETA * etaR(T) * h / 3.6e6;
@@ -458,7 +460,7 @@ input[type=range].w { height: 22px; }
     ter: { id: "ter", min: 0, max: 50, step: 1, get: function () { return S.hill; }, set: function (v) { S.hill = v; } }
   };
   var DESC = {
-    esp: "Typical peak acceleration of a manoeuvre, from the ESP accelerometer.",
+    esp: "Typical peak acceleration of a manoeuvre, from the ESP accelerometer. Cold weather and slopes tighten the band edges, because the same force is riskier there.",
     bms: "Measured consumption of this trip, including the energy to warm up the cabin and battery at the start.",
     tmp: function () { return "Outside temperature. " + tTxt(20) + " is the zero point: from " + tTxt(17) + " to " + tTxt(23) + " no heating or cooling is needed and the input has almost no weight."; },
     ter: function () { return "Climb per " + (IMP ? "mile" : "km") + " along the route (descent equals climb). " + slopeTxt(10) + " is about 1% average grade."; }
@@ -492,7 +494,7 @@ input[type=range].w { height: 22px; }
   }
 
   function fmtVal(k) {
-    if (k === "esp") return S.acc.toFixed(3) + "<small>g · " + bandOf(S.acc) + "</small>";
+    if (k === "esp") return S.acc.toFixed(3) + "<small>g · " + bandOf(S.acc / ctxF(S.temp, S.hill)) + "</small>";
     if (k === "bms") return eV(S.cons).toFixed(1) + "<small>" + eU() + "</small>";
     if (k === "tmp") return String(Math.round(tV(S.temp))).replace("-", "\u2212") + "<small>" + (IMP ? "°F" : "°C") + "</small>";
     return (IMP ? Math.round(S.hill * 5.28) : S.hill) + "<small>" + (IMP ? "ft/mi" : "m/km") + " · ≈" + (S.hill / 10).toFixed(1) + "% grade</small>";
@@ -515,7 +517,7 @@ input[type=range].w { height: 22px; }
     $("sc-d0").textContent = dTxt(1); $("sc-d1").textContent = dTxt(1000);
     $("sc-t0").textContent = dTxt(2) + " (many short trips)"; $("sc-t1").textContent = dTxt(200) + " (long trips)";
     $("lab200").textContent = "Last " + dTxt(200); $("lab1000").textContent = "Last " + dTxt(1000);
-    $("note").textContent = "Sub-scores follow the 10 km validation script. Speed is taken as " + (IMP ? "31 mph" : "50 km/h") + " average, vehicle 1950 kg, climb equals descent. Heating or cooling is counted from the " + tTxt(20) + " zero point (nothing inside " + tTxt(17) + " to " + tTxt(23) + "). Each start adds warm-up energy (about 1.4 kWh at " + tTxt(-10) + ", 0.4 kWh at " + tTxt(35) + ") that the score removes; the longer windows count one cold start per average trip. The ESP slider is the typical peak acceleration of a manoeuvre; the sub-score interpolates the ECO, Normal, Sporty and Aggressive band values.";
+    $("note").textContent = "Sub-scores follow the 10 km validation script. Speed is taken as " + (IMP ? "31 mph" : "50 km/h") + " average, vehicle 1950 kg, climb equals descent. Heating or cooling is counted from the " + tTxt(20) + " zero point (nothing inside " + tTxt(17) + " to " + tTxt(23) + "). Each start adds warm-up energy (about 1.4 kWh at " + tTxt(-10) + ", 0.4 kWh at " + tTxt(35) + ") that the score removes; the longer windows count one cold start per average trip. The ESP slider is the typical peak acceleration of a manoeuvre, judged against band edges that shrink in the cold (below 5 °C) and on slopes; the sub-score interpolates the ECO, Normal, Sporty and Aggressive band values.";
     $("x-dist").value = S.dist; fill($("x-dist")); $("o-dist").textContent = dTxt(S.dist);
     $("x-trip").value = S.trip; fill($("x-trip")); $("o-trip").textContent = dTxt(S.trip);
     $("x-cap").value = S.cap; fill($("x-cap")); $("o-cap").textContent = Math.round(S.cap * 100) + "%";
@@ -533,7 +535,8 @@ input[type=range].w { height: 22px; }
 
     // per-card results
     var e = r.eNorm;
-    $("res-esp").innerHTML = '<span>Sub-score <b class="num">' + r.S.esp.toFixed(0) + '</b></span><span>Weight <b class="num">' + S.W.esp + '% → ' + (r.w.esp * 100).toFixed(0) + '%</b></span><span>Adds <b class="num">' + pts(r.w.esp * r.S.esp) + ' pts</b></span>';
+    var cf = ctxF(S.temp, S.hill);
+    $("res-esp").innerHTML = '<span class="st ' + (cf < 1 ? "on" : "off") + '">' + (cf < 1 ? "Context ×" + cf.toFixed(2) + ": band edges " + (0.10 * cf).toFixed(2) + " / " + (0.20 * cf).toFixed(2) + " / " + (0.30 * cf).toFixed(2) + " g" : "Neutral context, standard band edges") + '</span><span>Sub-score <b class="num">' + r.S.esp.toFixed(0) + '</b></span><span>Weight <b class="num">' + S.W.esp + '% → ' + (r.w.esp * 100).toFixed(0) + '%</b></span><span>Adds <b class="num">' + pts(r.w.esp * r.S.esp) + ' pts</b></span>';
     $("res-bms").innerHTML = '<span>Normalised <b class="num">' + eTxt(e) + '</b></span><span>Sub-score <b class="num">' + r.S.bms.toFixed(0) + '</b></span><span>Weight <b class="num">' + S.W.bms + '% → ' + (r.w.bms * 100).toFixed(0) + '%</b></span><span>Adds <b class="num">' + pts(r.w.bms * r.S.bms) + ' pts</b></span><span>Warm-up in this trip <b class="num">' + r.eW.toFixed(2) + ' kWh (' + eV(r.eW / S.dist * 100).toFixed(1) + ' per ' + (IMP ? '100 mi' : '100 km') + ')</b></span><span class="st ' + (r.c.bms >= 1 ? "on" : "off") + '">confidence ' + Math.round(r.c.bms * 100) + '% at ' + dTxt(S.dist) + '</span>';
     $("res-tmp").innerHTML = '<span class="st ' + (r.act.tmp ? "on" : "off") + '">' + (r.act.tmp ? "Active, " + dK(climateK(S.temp)) + " beyond comfort zone" : "Neutral, comfort zone " + tTxt(17) + " to " + tTxt(23)) + '</span><span>Sub-score <b class="num">' + r.S.tmp.toFixed(0) + '</b></span><span>Weight <b class="num">' + S.W.tmp + '% → ' + (r.w.tmp * 100).toFixed(0) + '%</b></span><span>Adds <b class="num">' + pts(r.w.tmp * r.S.tmp) + ' pts</b></span>';
     $("res-ter").innerHTML = '<span class="st ' + (r.act.ter ? "on" : "off") + '">' + (r.act.ter ? "Active" : "Neutral, under " + altTxt(30) + " of descent") + '</span><span>Sub-score <b class="num">' + r.S.ter.toFixed(0) + '</b></span><span>Weight <b class="num">' + S.W.ter + '% → ' + (r.w.ter * 100).toFixed(0) + '%</b></span><span>Adds <b class="num">' + pts(r.w.ter * r.S.ter) + ' pts</b></span>';
@@ -546,7 +549,7 @@ input[type=range].w { height: 22px; }
     var n = S.tab === "trip" ? 1 : Math.max(1, Math.ceil(d / S.trip));
     var r = compute(S, d, n);
     $("wCov").textContent = dTxt(d) + (S.tab === "trip" ? " · " + Math.round(d / SPEED * 60) + " min" : "");
-    var sh = shares(S.acc), nm = ["ECO", "Normal", "Sporty", "Aggressive"], cl = ["var(--good)", "var(--c-nor)", "var(--warn)", "var(--bad)"];
+    var sh = shares(S.acc / ctxF(S.temp, S.hill)), nm = ["ECO", "Normal", "Sporty", "Aggressive"], cl = ["var(--good)", "var(--c-nor)", "var(--warn)", "var(--bad)"];
     $("bandBar").innerHTML = sh.map(function (v, i) { return '<i style="width:' + (v * 100).toFixed(1) + '%;background:' + cl[i] + '"></i>'; }).join("");
     $("bandLeg").innerHTML = sh.map(function (v, i) { return '<span><b style="background:' + cl[i] + '"></b>' + nm[i] + " " + Math.round(v * 100) + "%</span>"; }).join("");
     $("wScore").textContent = Math.round(r.ds);
@@ -555,9 +558,9 @@ input[type=range].w { height: 22px; }
     $("tEffS").textContent = eTxt(r.eNorm) + " in standard conditions";
     var pack = 75 * 0.82;
     $("tRange").textContent = dTxt(Math.round(pack / r.eRaw * 100));
-    var band = bandOf(S.acc);
+    var band = bandOf(S.acc / ctxF(S.temp, S.hill));
     $("tStyle").textContent = band === "ECO" ? "Efficient Driver" : band === "Normal" ? "Balanced Driver" : "Dynamic Driver";
-    $("tStyleS").textContent = "Typical peak " + S.acc.toFixed(2) + " g · " + band + " band";
+    $("tStyleS").textContent = "Typical peak " + S.acc.toFixed(2) + " g · " + band + " band" + (ctxF(S.temp, S.hill) < 1 ? " (tightened by weather and slope)" : "");
     var low = KEYS.slice().sort(function (a, b) { return r.S[a] - r.S[b]; })[0];
     var tips = {
       esp: "Smoother acceleration and braking moves more manoeuvres into the ECO band.",
