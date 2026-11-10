@@ -342,12 +342,12 @@ input[type=range].w { height: 22px; }
   function eTxt(e) { return eV(e).toFixed(1) + " " + eU(); }
   function tV(c) { return IMP ? c * 9 / 5 + 32 : c; }
   function tTxt(c) { return String(Math.round(tV(c))).replace("-", "\u2212") + (IMP ? "\u00a0°F" : "\u00a0°C"); }
-  function dK(k) { return Math.round(IMP ? k * 1.8 : k) + (IMP ? " °F" : " K"); }
+  function dK(k) { return Math.round(IMP ? k * 1.8 : k) + (IMP ? " °F" : " °C"); }
   function slopeTxt(m) { return IMP ? Math.round(m * 5.28) + " ft/mi" : m + " m/km"; }
   function altTxt(m) { return IMP ? Math.round(m * 3.28084) + " ft" : m + " m"; }
 
-  // 20 °C is the zero point: inside +-3 K nothing needs heating or cooling.
-  function climateK(T) { return Math.max(0, Math.abs(T - 20) - 3); }                 // climate demand in kelvin
+  // 20 °C is the zero point: inside +-3 °C nothing needs heating or cooling.
+  function climateK(T) { return Math.max(0, Math.abs(T - 20) - 3); }                 // climate demand in degrees
   function eWarm(T) { return (T < 20 ? 0.052 : 0.022) * climateK(T); }               // kWh per start: heat-up (cold) or pull-down (hot)
   var ZONE_KM = 3;  // first km of every trip left out of the climate-use ratio
   function pAux(T) { return 0.6 + (T < 20 ? 0.060 : 0.050) * climateK(T); }          // kW: base load + heating or cooling
@@ -417,7 +417,7 @@ input[type=range].w { height: 22px; }
     var eGrade = M * G * h / ETA / 3.6e6 - 0.8 * avail;
     var eNorm = Math.max(3, (eMeas - auxRef - eGrade) / d * 100 / fT(T));
     var sB = 100 * clamp((24 - eNorm) / 14, 0, 1);
-    // Temperature: climate-use ratio, blended in over the first 3 K beyond the comfort zone and 30 min of steady driving
+    // Temperature: climate-use ratio, blended in over the first 3 °C beyond the comfort zone and 30 min of steady driving
     var tAct = climateK(T) > 0 && eAux > 0 && tRun > 0;
     var bT = tAct ? clamp(climateK(T) / 3, 0, 1) * clamp(tRun / 0.5, 0, 1) : 0;
     var sTraw = clamp(75 - 250 * (st.kappa - 1), 0, 100);

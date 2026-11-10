@@ -20,9 +20,9 @@ ETA_T = 0.88
 def clamp(x, lo, hi): return max(lo, min(hi, x))
 def lerp(t, a, b): return a + (b - a) * t
 
-COMFORT_C, COMFORT_BAND = 20.0, 3.0     # 20 C is the zero point: no heating or cooling is needed within +-3 K
+COMFORT_C, COMFORT_BAND = 20.0, 3.0     # 20 C is the zero point: no heating or cooling is needed within +-3 C
 
-def climate_k(T):        # climate demand in kelvin: distance from the comfort zone, 0 inside 17..23 C
+def climate_k(T):        # climate demand in degrees C: distance from the comfort zone, 0 inside 17..23 C
     return max(0.0, abs(T - COMFORT_C) - COMFORT_BAND)
 
 def p_aux(T):            # kW, base load + heating (below 20 C) or cooling (above 20 C) power
@@ -57,7 +57,7 @@ FLOOR = 0.2
 E_BEST, E_WORST = 10.0, 24.0         # kWh/100km normalised: 100 pts / 0 pts
 ESP_CAP_MARGIN = 10.0                 # safety cap: the Drive Score is at most this many points above the ESP score
 E_NORM_MIN = 3.0                      # floor of the normalised consumption (inconsistent inputs cannot give a negative value)
-TMP_FULL_K, TMP_FULL_H = 3.0, 0.5     # climate demand (K) and steady driving time (h) at which the temperature sub-score counts fully
+TMP_FULL_K, TMP_FULL_H = 3.0, 0.5     # climate demand (degrees C) and steady driving time (h) at which the temperature sub-score counts fully
 CLIMATE_FULL_K = 10.0                 # climate demand at which the temperature input counts fully
 TER_ACTIVE_DOWN_M = 30.0
 WARM_ZONE_KM = 3                      # km at the start of every trip excluded from the climate-use ratio
@@ -350,7 +350,7 @@ def run():
     check("T13 normalised consumption is the same for a 10 km trip and a 200 km trip (warm-up removed)", maxnorm < 0.15, f"max difference {maxnorm:.2f} kWh/100 km")
     check("T14 200 km as one trip and as 20 short trips give the same Drive Score (<= 1 pt)", maxsame <= 1.0, f"max difference {maxsame:.2f} pts")
     check("T15 10 km versus 200 km Drive Score differs <= 6 pts (only the weights move with data volume)", maxd10 <= 6.0, f"max difference {maxd10:.1f} pts")
-    # T16-T18 temperature: 20 C is the zero point, no heating or cooling is needed inside +-3 K
+    # T16-T18 temperature: 20 C is the zero point, no heating or cooling is needed inside +-3 C
     def flat(pf, T, total=10, trip=10):
         key = f"T{T}"; CONDITIONS[key] = dict(T=float(T), up=[0] * 10, down=[0] * 10)
         try:
