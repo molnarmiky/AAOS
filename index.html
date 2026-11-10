@@ -52,6 +52,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 .status { display: flex; justify-content: space-between; align-items: center; color: var(--mut); font-size: 15px; }
 .status .r { display: flex; gap: 14px; align-items: center; }
+.units { display: inline-flex; border: 1px solid var(--line, #26324a); border-radius: 999px; padding: 2px; gap: 2px; }
+.units button { font: inherit; font-size: 13px; color: var(--mut); background: transparent; border: 0; border-radius: 999px; padding: 4px 12px; cursor: pointer; min-height: 28px; }
+.units button[aria-pressed="true"] { background: #0b63ff; color: #fff; }
+.units button:focus-visible { outline: 2px solid #8fb4ff; outline-offset: 1px; }
 h1 { margin: 6px 0 14px; font-size: clamp(30px, 4.2vw, 48px); font-weight: 700; letter-spacing: -0.02em; }
 
 .screen { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 28px; align-items: start; }
@@ -194,7 +198,7 @@ input[type=range].w { height: 22px; }
 
 <div class="status">
   <span class="num">10:24</span>
-  <span class="r"><span>5G</span><span class="num" id="topTemp">20°C</span></span>
+  <span class="r"><span class="units" role="group" aria-label="Measuring units"><button type="button" id="u-met" aria-pressed="true">Metric</button><button type="button" id="u-imp" aria-pressed="false">Imperial</button></span><span>5G</span><span class="num" id="topTemp">20°C</span></span>
 </div>
 <h1>Vehicle Dynamics</h1>
 
@@ -263,12 +267,12 @@ input[type=range].w { height: 22px; }
         <div>
           <div class="xrow"><label for="x-dist">Distance covered by the data</label><output id="o-dist" class="num"></output></div>
           <input type="range" id="x-dist" min="1" max="1000" step="1">
-          <div class="scale"><span>1 km</span><span>1000 km</span></div>
+          <div class="scale"><span id="sc-d0"></span><span id="sc-d1"></span></div>
         </div>
         <div>
           <div class="xrow"><label for="x-trip">Average trip length in the 200 and 1000 km windows</label><output id="o-trip" class="num"></output></div>
           <input type="range" id="x-trip" min="2" max="200" step="1">
-          <div class="scale"><span>2 km (many short trips)</span><span>200 km (long trips)</span></div>
+          <div class="scale"><span id="sc-t0"></span><span id="sc-t1"></span></div>
         </div>
         <div>
           <div class="xrow"><label for="x-cap">Energy recovered on descents (regen)</label><output id="o-cap" class="num"></output></div>
@@ -283,7 +287,7 @@ input[type=range].w { height: 22px; }
         <label class="sw" for="x-conf"><span>Scale weights by data confidence, as in the validation script (off: weights apply exactly as set)</span><input type="checkbox" id="x-conf"></label>
       </div>
     </details>
-    <p class="note">Sub-scores follow the 10 km validation script. Speed is taken as 50 km/h average, vehicle 1950 kg, climb equals descent. Heating or cooling is counted from the 20 °C zero point (nothing inside 17 to 23 °C). Each start adds warm-up energy (about 1.4 kWh at -10 °C, 0.4 kWh at 35 °C) that the score removes; the longer windows count one cold start per average trip. The ESP slider is the typical peak acceleration of a manoeuvre; the sub-score interpolates the ECO, Normal, Sporty and Aggressive band values.</p>
+    <p class="note" id="note"></p>
         </div>
   </section>
 
@@ -293,8 +297,8 @@ input[type=range].w { height: 22px; }
       <div class="sub">See how your driving style affects efficiency and range.</div>
       <div class="pills ptabs" role="tablist" aria-label="Driving Insights windows">
         <button role="tab" id="tab-trip" data-tab="trip" aria-selected="true">Current Trip</button>
-        <button role="tab" id="tab-w200" data-tab="w200" aria-selected="false">Last 200 km</button>
-        <button role="tab" id="tab-w1000" data-tab="w1000" aria-selected="false">Last 1000 km</button>
+        <button role="tab" id="tab-w200" data-tab="w200" aria-selected="false"><span id="lab200">Last 200 km</span></button>
+        <button role="tab" id="tab-w1000" data-tab="w1000" aria-selected="false"><span id="lab1000">Last 1000 km</span></button>
       </div>
 
       <div class="pbody">
@@ -328,6 +332,19 @@ input[type=range].w { height: 22px; }
   var clamp = function (x, a, b) { return Math.max(a, Math.min(b, x)); };
   var lerp = function (t, a, b) { return a + (b - a) * t; };
   var M = 1950, G = 9.81, ETA = 0.88, SPEED = 50;
+  // ---------- units: the model stays metric, only the display converts
+  var IMP = false, KMI = 1.609344;
+  try { IMP = localStorage.getItem("di-units") === "imp"; } catch (e) {}
+  function dV(km) { return IMP ? km / KMI : km; }
+  function dTxt(km) { var v = dV(km); return (IMP && v < 10 ? v.toFixed(1) : Math.round(v)) + (IMP ? " mi" : " km"); }
+  function eU() { return IMP ? "kWh/100 mi" : "kWh/100 km"; }
+  function eV(e) { return IMP ? e * KMI : e; }
+  function eTxt(e) { return eV(e).toFixed(1) + " " + eU(); }
+  function tV(c) { return IMP ? c * 9 / 5 + 32 : c; }
+  function tTxt(c) { return String(Math.round(tV(c))).replace("-", "\u2212") + (IMP ? "\u00a0°F" : "\u00a0°C"); }
+  function dK(k) { return Math.round(IMP ? k * 1.8 : k) + (IMP ? " °F" : " K"); }
+  function slopeTxt(m) { return IMP ? Math.round(m * 5.28) + " ft/mi" : m + " m/km"; }
+  function altTxt(m) { return IMP ? Math.round(m * 3.28084) + " ft" : m + " m"; }
 
   // 20 °C is the zero point: inside +-3 K nothing needs heating or cooling.
   function climateK(T) { return Math.max(0, Math.abs(T - 20) - 3); }                 // climate demand in kelvin
@@ -443,12 +460,13 @@ input[type=range].w { height: 22px; }
   var DESC = {
     esp: "Typical peak acceleration of a manoeuvre, from the ESP accelerometer.",
     bms: "Measured consumption of this trip, including the energy to warm up the cabin and battery at the start.",
-    tmp: "Outside temperature. 20 °C is the zero point: from 17 to 23 °C no heating or cooling is needed and the input has almost no weight.",
-    ter: "Climb per km along the route (descent equals climb). 10 m/km is about 1% average grade."
+    tmp: function () { return "Outside temperature. " + tTxt(20) + " is the zero point: from " + tTxt(17) + " to " + tTxt(23) + " no heating or cooling is needed and the input has almost no weight."; },
+    ter: function () { return "Climb per " + (IMP ? "mile" : "km") + " along the route (descent equals climb). " + slopeTxt(10) + " is about 1% average grade."; }
   };
-  var SCALE = {
-    esp: ["0.03 g", "0.40 g"], bms: ["8", "60 kWh/100 km"], tmp: ["−20 °C", "40 °C"], ter: ["0 m/km flat", "50 m/km"]
-  };
+  function descOf(k) { var d = DESC[k]; return typeof d === "function" ? d() : d; }
+  function scaleOf(k) {
+    return { esp: ["0.03 g", "0.40 g"], bms: [eV(8).toFixed(0), Math.round(eV(60)) + " " + eU()], tmp: [tTxt(-20), tTxt(40)], ter: [slopeTxt(0) + " flat", slopeTxt(50)] }[k];
+  }
 
   function fill(el) { el.style.setProperty("--p", ((el.value - el.min) / (el.max - el.min) * 100) + "%"); }
 
@@ -459,9 +477,9 @@ input[type=range].w { height: 22px; }
       html += '<div class="inp" id="card-' + k + '">' +
         '<div class="hd"><div class="nm"><span class="dot" style="background:' + d.col + '"></span><label for="in-' + k + '">' + d.name + '</label></div>' +
         '<div class="val num" id="val-' + k + '"></div></div>' +
-        '<div class="desc">' + DESC[k] + '</div>' +
+        '<div class="desc" id="desc-' + k + '"></div>' +
         '<div class="rng"><input type="range" id="in-' + k + '" min="' + c.min + '" max="' + c.max + '" step="' + c.step + '" style="--col:' + d.col + '">' +
-        '<div class="scale"><span>' + SCALE[k][0] + '</span><span>' + SCALE[k][1] + '</span></div></div>' +
+        '<div class="scale"><span id="sc-' + k + '-0"></span><span id="sc-' + k + '-1"></span></div></div>' +
         '<div class="wrow"><label for="w-' + k + '">Weight</label>' +
         '<input class="w" type="range" id="w-' + k + '" min="1" max="97" step="1" style="--col:' + d.col + '"><output class="num" id="wo-' + k + '"></output></div>' +
         '<div class="res" id="res-' + k + '"></div></div>';
@@ -475,9 +493,9 @@ input[type=range].w { height: 22px; }
 
   function fmtVal(k) {
     if (k === "esp") return S.acc.toFixed(3) + "<small>g · " + bandOf(S.acc) + "</small>";
-    if (k === "bms") return S.cons.toFixed(1) + "<small>kWh/100 km</small>";
-    if (k === "tmp") return String(S.temp).replace("-", "−") + "<small>°C</small>";
-    return S.hill + "<small>m/km · ≈" + (S.hill / 10).toFixed(1) + "% grade</small>";
+    if (k === "bms") return eV(S.cons).toFixed(1) + "<small>" + eU() + "</small>";
+    if (k === "tmp") return String(Math.round(tV(S.temp))).replace("-", "\u2212") + "<small>" + (IMP ? "°F" : "°C") + "</small>";
+    return (IMP ? Math.round(S.hill * 5.28) : S.hill) + "<small>" + (IMP ? "ft/mi" : "m/km") + " · ≈" + (S.hill / 10).toFixed(1) + "% grade</small>";
   }
 
   function pts(x) { return (x >= 0 ? "+" : "") + x.toFixed(1); }
@@ -490,13 +508,20 @@ input[type=range].w { height: 22px; }
       var wv = $("w-" + k); wv.value = S.W[k]; fill(wv);
       $("wo-" + k).textContent = S.W[k] + "%";
       $("val-" + k).innerHTML = fmtVal(k);
+      $("desc-" + k).textContent = descOf(k);
+      var sc = scaleOf(k); $("sc-" + k + "-0").textContent = sc[0]; $("sc-" + k + "-1").textContent = sc[1];
     });
-    $("x-dist").value = S.dist; fill($("x-dist")); $("o-dist").textContent = S.dist + " km";
-    $("x-trip").value = S.trip; fill($("x-trip")); $("o-trip").textContent = S.trip + " km";
+    $("u-met").setAttribute("aria-pressed", IMP ? "false" : "true"); $("u-imp").setAttribute("aria-pressed", IMP ? "true" : "false");
+    $("sc-d0").textContent = dTxt(1); $("sc-d1").textContent = dTxt(1000);
+    $("sc-t0").textContent = dTxt(2) + " (many short trips)"; $("sc-t1").textContent = dTxt(200) + " (long trips)";
+    $("lab200").textContent = "Last " + dTxt(200); $("lab1000").textContent = "Last " + dTxt(1000);
+    $("note").textContent = "Sub-scores follow the 10 km validation script. Speed is taken as " + (IMP ? "31 mph" : "50 km/h") + " average, vehicle 1950 kg, climb equals descent. Heating or cooling is counted from the " + tTxt(20) + " zero point (nothing inside " + tTxt(17) + " to " + tTxt(23) + "). Each start adds warm-up energy (about 1.4 kWh at " + tTxt(-10) + ", 0.4 kWh at " + tTxt(35) + ") that the score removes; the longer windows count one cold start per average trip. The ESP slider is the typical peak acceleration of a manoeuvre; the sub-score interpolates the ECO, Normal, Sporty and Aggressive band values.";
+    $("x-dist").value = S.dist; fill($("x-dist")); $("o-dist").textContent = dTxt(S.dist);
+    $("x-trip").value = S.trip; fill($("x-trip")); $("o-trip").textContent = dTxt(S.trip);
     $("x-cap").value = S.cap; fill($("x-cap")); $("o-cap").textContent = Math.round(S.cap * 100) + "%";
     $("x-kap").value = S.kappa; fill($("x-kap")); $("o-kap").textContent = S.kappa.toFixed(2) + "×";
     $("x-conf").checked = S.conf;
-    $("topTemp").textContent = String(S.temp).replace("-", "−") + "°C";
+    $("topTemp").textContent = tTxt(S.temp).replace("\u00a0", "");
 
     var r = compute(S, S.dist);
     // result header
@@ -509,9 +534,9 @@ input[type=range].w { height: 22px; }
     // per-card results
     var e = r.eNorm;
     $("res-esp").innerHTML = '<span>Sub-score <b class="num">' + r.S.esp.toFixed(0) + '</b></span><span>Weight <b class="num">' + S.W.esp + '% → ' + (r.w.esp * 100).toFixed(0) + '%</b></span><span>Adds <b class="num">' + pts(r.w.esp * r.S.esp) + ' pts</b></span>';
-    $("res-bms").innerHTML = '<span>Normalised <b class="num">' + e.toFixed(1) + ' kWh/100 km</b></span><span>Sub-score <b class="num">' + r.S.bms.toFixed(0) + '</b></span><span>Weight <b class="num">' + S.W.bms + '% → ' + (r.w.bms * 100).toFixed(0) + '%</b></span><span>Adds <b class="num">' + pts(r.w.bms * r.S.bms) + ' pts</b></span><span>Warm-up in this trip <b class="num">' + r.eW.toFixed(2) + ' kWh (' + (r.eW / S.dist * 100).toFixed(1) + ' per 100 km)</b></span><span class="st ' + (r.c.bms >= 1 ? "on" : "off") + '">confidence ' + Math.round(r.c.bms * 100) + '% at ' + S.dist + ' km</span>';
-    $("res-tmp").innerHTML = '<span class="st ' + (r.act.tmp ? "on" : "off") + '">' + (r.act.tmp ? "Active, " + climateK(S.temp).toFixed(0) + " K beyond comfort zone" : "Neutral, comfort zone 17 to 23 °C") + '</span><span>Sub-score <b class="num">' + r.S.tmp.toFixed(0) + '</b></span><span>Weight <b class="num">' + S.W.tmp + '% → ' + (r.w.tmp * 100).toFixed(0) + '%</b></span><span>Adds <b class="num">' + pts(r.w.tmp * r.S.tmp) + ' pts</b></span>';
-    $("res-ter").innerHTML = '<span class="st ' + (r.act.ter ? "on" : "off") + '">' + (r.act.ter ? "Active" : "Neutral, under 30 m of descent") + '</span><span>Sub-score <b class="num">' + r.S.ter.toFixed(0) + '</b></span><span>Weight <b class="num">' + S.W.ter + '% → ' + (r.w.ter * 100).toFixed(0) + '%</b></span><span>Adds <b class="num">' + pts(r.w.ter * r.S.ter) + ' pts</b></span>';
+    $("res-bms").innerHTML = '<span>Normalised <b class="num">' + eTxt(e) + '</b></span><span>Sub-score <b class="num">' + r.S.bms.toFixed(0) + '</b></span><span>Weight <b class="num">' + S.W.bms + '% → ' + (r.w.bms * 100).toFixed(0) + '%</b></span><span>Adds <b class="num">' + pts(r.w.bms * r.S.bms) + ' pts</b></span><span>Warm-up in this trip <b class="num">' + r.eW.toFixed(2) + ' kWh (' + eV(r.eW / S.dist * 100).toFixed(1) + ' per ' + (IMP ? '100 mi' : '100 km') + ')</b></span><span class="st ' + (r.c.bms >= 1 ? "on" : "off") + '">confidence ' + Math.round(r.c.bms * 100) + '% at ' + dTxt(S.dist) + '</span>';
+    $("res-tmp").innerHTML = '<span class="st ' + (r.act.tmp ? "on" : "off") + '">' + (r.act.tmp ? "Active, " + dK(climateK(S.temp)) + " beyond comfort zone" : "Neutral, comfort zone " + tTxt(17) + " to " + tTxt(23)) + '</span><span>Sub-score <b class="num">' + r.S.tmp.toFixed(0) + '</b></span><span>Weight <b class="num">' + S.W.tmp + '% → ' + (r.w.tmp * 100).toFixed(0) + '%</b></span><span>Adds <b class="num">' + pts(r.w.tmp * r.S.tmp) + ' pts</b></span>';
+    $("res-ter").innerHTML = '<span class="st ' + (r.act.ter ? "on" : "off") + '">' + (r.act.ter ? "Active" : "Neutral, under " + altTxt(30) + " of descent") + '</span><span>Sub-score <b class="num">' + r.S.ter.toFixed(0) + '</b></span><span>Weight <b class="num">' + S.W.ter + '% → ' + (r.w.ter * 100).toFixed(0) + '%</b></span><span>Adds <b class="num">' + pts(r.w.ter * r.S.ter) + ' pts</b></span>';
 
     renderWindow();
   }
@@ -520,16 +545,16 @@ input[type=range].w { height: 22px; }
     var d = S.tab === "trip" ? S.dist : S.tab === "w200" ? 200 : 1000;
     var n = S.tab === "trip" ? 1 : Math.max(1, Math.ceil(d / S.trip));
     var r = compute(S, d, n);
-    $("wCov").textContent = d + " km" + (S.tab === "trip" ? " · " + Math.round(d / SPEED * 60) + " min" : "");
+    $("wCov").textContent = dTxt(d) + (S.tab === "trip" ? " · " + Math.round(d / SPEED * 60) + " min" : "");
     var sh = shares(S.acc), nm = ["ECO", "Normal", "Sporty", "Aggressive"], cl = ["var(--good)", "var(--c-nor)", "var(--warn)", "var(--bad)"];
     $("bandBar").innerHTML = sh.map(function (v, i) { return '<i style="width:' + (v * 100).toFixed(1) + '%;background:' + cl[i] + '"></i>'; }).join("");
     $("bandLeg").innerHTML = sh.map(function (v, i) { return '<span><b style="background:' + cl[i] + '"></b>' + nm[i] + " " + Math.round(v * 100) + "%</span>"; }).join("");
     $("wScore").textContent = Math.round(r.ds);
     $("wTag").textContent = ratingOf(r.ds) + ". " + (r.ds >= 80 ? "A smoother, more efficient drive." : r.ds >= 60 ? "A mix of smooth and firm driving." : "Room to drive more smoothly.");
     $("tEff").textContent = Math.round(r.S.bms) + "%";
-    $("tEffS").textContent = r.eNorm.toFixed(1) + " kWh/100 km in standard conditions";
+    $("tEffS").textContent = eTxt(r.eNorm) + " in standard conditions";
     var pack = 75 * 0.82;
-    $("tRange").textContent = Math.round(pack / r.eRaw * 100) + " km";
+    $("tRange").textContent = dTxt(Math.round(pack / r.eRaw * 100));
     var band = bandOf(S.acc);
     $("tStyle").textContent = band === "ECO" ? "Efficient Driver" : band === "Normal" ? "Balanced Driver" : "Dynamic Driver";
     $("tStyleS").textContent = "Typical peak " + S.acc.toFixed(2) + " g · " + band + " band";
@@ -541,7 +566,7 @@ input[type=range].w { height: 22px; }
       ter: "Little energy is recovered on descents. Lift off earlier and let regen slow the car."
     };
     $("wSug").textContent = r.ds >= 90 ? "Excellent. Keep this driving style." : tips[low];
-    $("wHint").textContent = "Measured consumption in this window: " + r.eRaw.toFixed(1) + " kWh/100 km with " + n + (n === 1 ? " cold start" : " cold starts") + " (" + (r.eW / d * 100).toFixed(1) + " kWh/100 km of warm-up). Normalised: " + r.eNorm.toFixed(1) + ".";
+    $("wHint").textContent = "Measured consumption in this window: " + eTxt(r.eRaw) + " with " + n + (n === 1 ? " cold start" : " cold starts") + " (" + eTxt(r.eW / d * 100) + " of warm-up). Normalised: " + eV(r.eNorm).toFixed(1) + ".";
   }
 
   function setTab(t) {
@@ -575,6 +600,10 @@ input[type=range].w { height: 22px; }
   $("x-kap").addEventListener("input", function (e) { S.kappa = parseFloat(e.target.value); render(); });
   $("x-conf").addEventListener("change", function (e) { S.conf = e.target.checked; render(); });
   $("resetW").addEventListener("click", function () { S.W = { esp: 60, bms: 20, tmp: 10, ter: 10 }; S.conf = false; render(); });
+
+  function setUnits(imp) { IMP = imp; try { localStorage.setItem("di-units", imp ? "imp" : "met"); } catch (e) {} render(); }
+  $("u-met").addEventListener("click", function () { setUnits(false); });
+  $("u-imp").addEventListener("click", function () { setUnits(true); });
 
   buildCards();
   setLTab("formula");
