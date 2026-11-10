@@ -55,7 +55,8 @@ def band_weight(ac, f=1.0):
 BASE_W = {"ESP": 60.0, "BMS": 20.0, "TMP": 10.0, "TER": 10.0}
 FLOOR = 0.2
 E_BEST, E_WORST = 10.0, 24.0         # kWh/100km normalised: 100 pts / 0 pts
-NEUTRAL = {"TMP": 75.0, "TER": 70.0}
+E_NORM_MIN = 3.0                      # floor of the normalised consumption (inconsistent inputs cannot give a negative value)
+TMP_FULL_K, TMP_FULL_H = 3.0, 0.5     # climate demand (K) and steady driving time (h) at which the temperature sub-score counts fully
 CLIMATE_FULL_K = 10.0                 # climate demand at which the temperature input counts fully
 TER_ACTIVE_DOWN_M = 30.0
 WARM_ZONE_KM = 3                      # km at the start of every trip excluded from the climate-use ratio
@@ -92,45 +93,51 @@ def score(a, have=("ESP", "BMS", "TMP", "TER"), params=None):
     s_bms = e_norm = e_raw = None
     if "BMS" in have and a["e_meas_kwh"] > 0 and T is not None:
         t_h = a["dur_s"] / 3600.0
-        e_aux_std = p["aux"] * p_aux(20.0) * t_h
-        e_aux_exc = a["e_aux_kwh"] - e_aux_std               # climate-driven extra only
-        # climb energy from the model; descent recovery taken from the BMS regen meter, so the driver's
-        # capture shortfall is judged only once (in S_TER), not again in S_BMS
-        if a["e_regen_down_kwh"] and a["e_regen_down_kwh"] > 0:
-            e_rec = a["e_regen_down_kwh"]
-        else:
-            e_rec = p["m"] * G * ETA_T * p["eta_r"] * eta_r(T) * a["h_down_m"] / 3.6e6
+        # Reference, not the driver's own values: the climate energy a typical driver needs (heating or cooling
+        # above the 20 C base load, plus the warm-up of every trip start) and the descent recovery a good driver
+        # reaches (CAPTURE_REF). The driver's extra climate use and missed recovery therefore stay in e_norm.
+        e_aux_ref = p["aux"] * (p_aux(T) - p_aux(20.0)) * t_h + p["aux"] * e_warm(T) * (a["n_trips"] or 0.0)
+        avail_b = p["m"] * G * ETA_T * p["eta_r"] * eta_r(T) * a["h_down_m"] / 3.6e6
+        e_rec = CAPTURE_REF * avail_b
         e_grade = p["m"] * G * a["h_up_m"] / ETA_T / 3.6e6 - e_rec
-        e_norm = (a["e_meas_kwh"] - e_aux_exc - e_grade) / d * 100.0 / f_T(T)
+        e_norm = max(E_NORM_MIN, (a["e_meas_kwh"] - e_aux_ref - e_grade) / d * 100.0 / f_T(T))
         s_bms = 100.0 * clamp((E_WORST - e_norm) / (E_WORST - E_BEST), 0, 1)
     if a["e_meas_kwh"] > 0:
         e_raw = a["e_meas_kwh"] / d * 100.0
     # --- Temperature: driver's climate-use factor, measured on steady driving only.
     # The first WARM_ZONE_KM of every trip (cabin and battery warm-up) are left out of this ratio.
-    t_active = False; s_tmp = NEUTRAL["TMP"]; t_run = (a["dur_run_s"] or 0.0) / 3600.0
+    t_active = False; s_tmp = None; t_run = (a["dur_run_s"] or 0.0) / 3600.0; b_t = 0.0
     if "TMP" in have and T is not None:
         t_active = climate_k(T) > 0 and a["e_aux_kwh"] > 0 and t_run > 0
         if t_active:
             kappa = a["e_aux_run_kwh"] / (p["aux"] * p_aux(T) * t_run)
             s_tmp = clamp(75.0 - 250.0 * (kappa - 1.0), 0, 100)
-    # --- Terrain: regen capture on descents
-    r_active = False; s_ter = NEUTRAL["TER"]
-    if "TER" in have and T is not None and a["h_down_m"] >= TER_ACTIVE_DOWN_M:
+            b_t = clamp(climate_k(T) / TMP_FULL_K, 0, 1) * clamp(t_run / TMP_FULL_H, 0, 1)     # no jump at the edge of the comfort zone
+    # --- Terrain: regen capture on descents, blended in over the first TER_ACTIVE_DOWN_M metres of descent
+    r_active = False; s_ter = None; b_r = 0.0
+    if "TER" in have and T is not None and a["h_down_m"] > 0:
         avail = p["m"] * G * ETA_T * p["eta_r"] * eta_r(T) * a["h_down_m"] / 3.6e6
         if avail > 0 and a["e_regen_down_kwh"] is not None:
             r_active = True
             s_ter = clamp(100.0 * (a["e_regen_down_kwh"] / avail) / CAPTURE_REF, 0, 100)
+            b_r = clamp(a["h_down_m"] / TER_ACTIVE_DOWN_M, 0, 1)
     # --- confidence and weights (all > 0)
     c = {"ESP": 1.0 if s_esp is not None else FLOOR,
          "BMS": clamp(d / 30.0, FLOOR, 1.0) if s_bms is not None else FLOOR,
          # climate-use score needs enough steady driving time (warm-up dominates short trips): full at 30 min
          "TMP": clamp(climate_k(T) / CLIMATE_FULL_K * min(1.0, t_run / 0.5), FLOOR, 1.0) if t_active else FLOOR,
-         "TER": (0.8 if r_active else FLOOR)}
+         "TER": (max(FLOOR, 0.8 * b_r) if r_active else FLOOR)}
     raw_w = {k: BASE_W[k] * c[k] for k in BASE_W}
     tot = sum(raw_w.values())
     w = {k: raw_w[k] / tot for k in raw_w}
-    S = {"ESP": s_esp if s_esp is not None else 70.0,
-         "BMS": s_bms if s_bms is not None else 70.0, "TMP": s_tmp, "TER": s_ter}
+    # Neutral value of an inactive or still-ramping input = the weighted mean of the ESP and BMS scores, so an
+    # input with nothing to judge neither rewards nor punishes (a perfect driver can reach 100).
+    base = [(BASE_W[k] * c[k], v) for k, v in (("ESP", s_esp), ("BMS", s_bms)) if v is not None]
+    neutral = sum(x * v for x, v in base) / sum(x for x, _ in base) if base else 70.0
+    S = {"ESP": s_esp if s_esp is not None else neutral,
+         "BMS": s_bms if s_bms is not None else neutral,
+         "TMP": neutral if s_tmp is None else neutral + b_t * (s_tmp - neutral),
+         "TER": neutral if s_ter is None else neutral + b_r * (s_ter - neutral)}
     ds = sum(w[k] * S[k] for k in w)
     raw_score = None
     if s_esp is not None and e_raw is not None:      # v1.0-style: no normalisation
@@ -141,6 +148,7 @@ def score(a, have=("ESP", "BMS", "TMP", "TER"), params=None):
                 raw_ie=(100.0 * clamp((E_WORST - e_raw) / (E_WORST - E_BEST), 0, 1) if e_raw else None))
 
 def rating(ds):
+    ds = int(ds + 0.5)               # the rating follows the displayed, rounded number
     return "Excellent" if ds >= 90 else "Good" if ds >= 80 else "Balanced" if ds >= 60 else "Needs Improvement"
 
 # ------------------------------------------------------------------ 3. simulator (stand-in for ESP + BMS + HVAC + slope)
@@ -312,9 +320,11 @@ def run():
     check("T8 missing-source fallbacks keep all weights > 0 and a finite score", fb_ok, "; ".join(det))
     # T9 inactive conditions are neutral: mild-flat -> temperature + terrain inactive
     r = grid[("Normal", "mild-flat")][2]
-    check("T9 inactive conditions give neutral sub-scores and floor weight",
-          r["S"]["TMP"] == NEUTRAL["TMP"] and r["S"]["TER"] == NEUTRAL["TER"]
-          and r["c"]["TMP"] == FLOOR and r["c"]["TER"] == FLOOR)
+    nb = (60 * r["c"]["ESP"] * r["S"]["ESP"] + 20 * r["c"]["BMS"] * r["S"]["BMS"]) / (60 * r["c"]["ESP"] + 20 * r["c"]["BMS"])
+    check("T9 inactive inputs take the mean of the ESP and BMS scores and the floor weight, so the total equals that mean",
+          abs(r["S"]["TMP"] - nb) < 1e-9 and abs(r["S"]["TER"] - nb) < 1e-9
+          and r["c"]["TMP"] == FLOOR and r["c"]["TER"] == FLOOR and abs(r["drive_score"] - nb) < 1e-9,
+          f"S_TMP {r['S']['TMP']:.1f}, S_TER {r['S']['TER']:.1f}, total {r['drive_score']:.1f}")
     # T10 determinism
     a1 = score(aggregate(simulate("Eco", "cold-hilly")))["drive_score"]
     a2 = score(aggregate(simulate("Eco", "cold-hilly")))["drive_score"]
@@ -367,6 +377,39 @@ def run():
           all(CTX_MIN <= f <= 1.0 for f in fs) and ctx_factor(5, 0) == 1.0 and ctx_factor(35, 0) == 1.0
           and ctx_factor(-5, 3) < ctx_factor(-5, 0) < ctx_factor(5, 0) and ctx_factor(5, 3) < ctx_factor(5, 0),
           f"cold-hilly {ctx_factor(-5, 2.8):.3f}")
+    # T19 worse regen capture or more climate use never raises the Drive Score (review: reference, not driver values)
+    import copy
+    def with_driver(pf, cd, cap=None, kappa=None):
+        bs = simulate(pf, cd); T0 = CONDITIONS[cd]["T"]
+        for b in bs:
+            if cap is not None: b.e_regen_down_kwh *= cap
+            if kappa is not None:
+                extra = (kappa - 1.0) * b.e_aux_kwh; b.e_aux_kwh += extra; b.e_meas_kwh += extra
+        return score(aggregate(bs))["drive_score"]
+    caps = [with_driver("Normal", "cold-hilly", cap=c) for c in (1.4, 1.0, 0.5, 0.1, 0.0)]
+    check("T19 less regen capture on descents never raises the Drive Score (cap x1.4, x1, x0.5, x0.1, x0)",
+          all(caps[i] >= caps[i + 1] - 1e-9 for i in range(4)), ", ".join(f"{x:.1f}" for x in caps))
+    ks = [with_driver("Normal", "cold-hilly", kappa=k) for k in (0.8, 1.0, 1.3, 1.6)]
+    check("T19b more climate use never raises the Drive Score (kappa x0.8, x1, x1.3, x1.6)",
+          all(ks[i] >= ks[i + 1] - 1e-9 for i in range(3)), ", ".join(f"{x:.1f}" for x in ks))
+    # T20 a perfect driver on a mild flat road can reach 100; no jump at the 30 m descent threshold
+    pa = aggregate(simulate("Eco", "mild-flat")); pa["dv_weighted"] = pa["dv_total"]; pa["e_meas_kwh"] = 10.0 * pa["dist_km"] / 100 * 1.0
+    pr_ = score(pa)
+    check("T20 a perfect ESP and BMS driver on a mild flat road reaches 100", pr_["drive_score"] > 99.5, f"{pr_['drive_score']:.1f}")
+    prev = None; jump = 0.0
+    for dm in range(0, 61):
+        a2 = aggregate(simulate("Normal", "mild-hilly")); sc = a2["h_down_m"]
+        a2["h_down_m"] = float(dm); a2["h_up_m"] = float(dm); a2["e_regen_down_kwh"] = 0.30 * (M * G * ETA_T * eta_r(20) * dm / 3.6e6)
+        v = score(a2)["drive_score"]
+        if prev is not None: jump = max(jump, abs(v - prev))
+        prev = v
+    check("T21 no jump when descent grows from 0 to 60 m (step <= 0.6 pts per metre)", jump <= 0.6, f"max step {jump:.2f} pts")
+    # T22 rating follows the rounded score
+    check("T22 rating thresholds apply to the rounded score (89.9 -> 90 Excellent, 79.6 -> 80 Good, 59.5 -> 60 Balanced)",
+          rating(89.9) == "Excellent" and rating(79.6) == "Good" and rating(59.5) == "Balanced" and rating(59.4) == "Needs Improvement")
+    # T23 normalised consumption is never negative, even for an inconsistent input (12 kWh/100 km on a 50 m/km climb)
+    a3 = aggregate(simulate("Eco", "mild-hilly")); a3["h_up_m"] *= 4; a3["h_down_m"] *= 4
+    check("T23 normalised consumption never below the 3 kWh/100 km floor", score(a3)["e_norm"] >= E_NORM_MIN, f"{score(a3)['e_norm']:.1f}")
     return grid
 
 def export(grid):

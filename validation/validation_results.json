@@ -28,32 +28,32 @@
   {
    "name": "T5 Eco: consumption spread across the 4 conditions shrinks after normalisation (kWh/100 km)",
    "passed": true,
-   "detail": "raw 22.6 -> normalised 1.7"
+   "detail": "raw 22.6 -> normalised 1.5"
   },
   {
    "name": "T5 Eco: Drive Score spread across conditions <= 12 pts (same driver, bounded context effect)",
    "passed": true,
-   "detail": "v1.0-style raw score 22.8 pts -> Drive Score 3.5 pts"
+   "detail": "v1.0-style raw score 22.8 pts -> Drive Score 4.7 pts"
   },
   {
    "name": "T5 Normal: consumption spread across the 4 conditions shrinks after normalisation (kWh/100 km)",
    "passed": true,
-   "detail": "raw 24.2 -> normalised 2.1"
+   "detail": "raw 24.2 -> normalised 2.9"
   },
   {
    "name": "T5 Normal: Drive Score spread across conditions <= 12 pts (same driver, bounded context effect)",
    "passed": true,
-   "detail": "v1.0-style raw score 20.8 pts -> Drive Score 9.5 pts"
+   "detail": "v1.0-style raw score 20.8 pts -> Drive Score 10.8 pts"
   },
   {
    "name": "T5 Aggressive: consumption spread across the 4 conditions shrinks after normalisation (kWh/100 km)",
    "passed": true,
-   "detail": "raw 25.8 -> normalised 2.0"
+   "detail": "raw 25.8 -> normalised 3.6"
   },
   {
    "name": "T5 Aggressive: Drive Score spread across conditions <= 12 pts (same driver, bounded context effect)",
    "passed": true,
-   "detail": "v1.0-style raw score 7.7 pts -> Drive Score 6.7 pts"
+   "detail": "v1.0-style raw score 7.7 pts -> Drive Score 6.8 pts"
   },
   {
    "name": "T6 window additivity (sum of 2x5 km buckets == 10 km window)",
@@ -68,17 +68,17 @@
   {
    "name": "T7b +-20 % model error: Drive Score moves <= 10 pts (worst corner of 8 combinations)",
    "passed": true,
-   "detail": "max shift 6.6 pts"
+   "detail": "max shift 5.7 pts"
   },
   {
    "name": "T8 missing-source fallbacks keep all weights > 0 and a finite score",
    "passed": true,
-   "detail": "no BMS: 67.0; no temperature: 64.6; no terrain: 65.0; ESP only: 66.3"
+   "detail": "no BMS: 66.2; no temperature: 63.8; no terrain: 63.5; ESP only: 65.7"
   },
   {
-   "name": "T9 inactive conditions give neutral sub-scores and floor weight",
+   "name": "T9 inactive inputs take the mean of the ESP and BMS scores and the floor weight, so the total equals that mean",
    "passed": true,
-   "detail": ""
+   "detail": "S_TMP 74.8, S_TER 74.8, total 74.8"
   },
   {
    "name": "T10 deterministic (same seed -> same score)",
@@ -98,17 +98,17 @@
   {
    "name": "T13 normalised consumption is the same for a 10 km trip and a 200 km trip (warm-up removed)",
    "passed": true,
-   "detail": "max difference 0.00 kWh/100 km"
+   "detail": "max difference 0.06 kWh/100 km"
   },
   {
    "name": "T14 200 km as one trip and as 20 short trips give the same Drive Score (<= 1 pt)",
    "passed": true,
-   "detail": "max difference 0.00 pts"
+   "detail": "max difference 0.10 pts"
   },
   {
    "name": "T15 10 km versus 200 km Drive Score differs <= 6 pts (only the weights move with data volume)",
    "passed": true,
-   "detail": "max difference 3.3 pts"
+   "detail": "max difference 2.3 pts"
   },
   {
    "name": "T16 inside the comfort zone (17 to 23 C) temperature has no effect on measured consumption or score",
@@ -128,12 +128,42 @@
   {
    "name": "T17b cooling (35 C) leaves the score within 3 pts; heating weather (-5 C) lowers it by 1 to 12 pts (grip context)",
    "passed": true,
-   "detail": "20 C 74.7, -5 C 67.9, 35 C 74.7"
+   "detail": "20 C 74.8, -5 C 67.3, 35 C 74.8"
   },
   {
    "name": "T18 context factor stays within 0.70 to 1.00, equals 1.00 at 5 C and above on flat roads, and never rises with worse conditions",
    "passed": true,
    "detail": "cold-hilly 0.844"
+  },
+  {
+   "name": "T19 less regen capture on descents never raises the Drive Score (cap x1.4, x1, x0.5, x0.1, x0)",
+   "passed": true,
+   "detail": "66.7, 64.0, 60.7, 58.0, 57.4"
+  },
+  {
+   "name": "T19b more climate use never raises the Drive Score (kappa x0.8, x1, x1.3, x1.6)",
+   "passed": true,
+   "detail": "65.9, 64.0, 61.2, 60.5"
+  },
+  {
+   "name": "T20 a perfect ESP and BMS driver on a mild flat road reaches 100",
+   "passed": true,
+   "detail": "100.0"
+  },
+  {
+   "name": "T21 no jump when descent grows from 0 to 60 m (step <= 0.6 pts per metre)",
+   "passed": true,
+   "detail": "max step 0.18 pts"
+  },
+  {
+   "name": "T22 rating thresholds apply to the rounded score (89.9 -> 90 Excellent, 79.6 -> 80 Good, 59.5 -> 60 Balanced)",
+   "passed": true,
+   "detail": ""
+  },
+  {
+   "name": "T23 normalised consumption never below the 3 kWh/100 km floor",
+   "passed": true,
+   "detail": "3.0"
   }
  ],
  "table": [
@@ -142,18 +172,18 @@
    "condition": "mild-flat",
    "dist_km": 10.0,
    "S_ESP": 92.0,
-   "S_BMS": 90.0,
-   "S_TMP": 75.0,
-   "S_TER": 70.0,
+   "S_BMS": 91.6,
+   "S_TMP": 92.0,
+   "S_TER": 92.0,
    "e_raw": 11.18,
-   "e_norm": 11.41,
+   "e_norm": 11.18,
    "weights": {
     "ESP": 0.849,
     "BMS": 0.094,
     "TMP": 0.028,
     "TER": 0.028
    },
-   "drive_score": 90.7,
+   "drive_score": 92.0,
    "rating": "Excellent",
    "raw_score": 91.9
   },
@@ -162,18 +192,18 @@
    "condition": "mild-hilly",
    "dist_km": 10.0,
    "S_ESP": 90.7,
-   "S_BMS": 90.5,
-   "S_TMP": 75.0,
-   "S_TER": 100,
+   "S_BMS": 92.3,
+   "S_TMP": 90.8,
+   "S_TER": 100.0,
    "e_raw": 15.72,
-   "e_norm": 11.33,
+   "e_norm": 11.08,
    "weights": {
     "ESP": 0.783,
     "BMS": 0.087,
     "TMP": 0.026,
     "TER": 0.104
    },
-   "drive_score": 91.2,
+   "drive_score": 91.8,
    "rating": "Excellent",
    "raw_score": 84.4
   },
@@ -182,18 +212,18 @@
    "condition": "cold-flat",
    "dist_km": 10.0,
    "S_ESP": 88.4,
-   "S_BMS": 80.9,
-   "S_TMP": 100,
-   "S_TER": 70.0,
+   "S_BMS": 85.5,
+   "S_TMP": 92.4,
+   "S_TER": 88.1,
    "e_raw": 27.7,
-   "e_norm": 12.67,
+   "e_norm": 12.03,
    "weights": {
     "ESP": 0.784,
     "BMS": 0.087,
     "TMP": 0.103,
     "TER": 0.026
    },
-   "drive_score": 88.4,
+   "drive_score": 88.5,
    "rating": "Good",
    "raw_score": 70.7
   },
@@ -202,18 +232,18 @@
    "condition": "cold-hilly",
    "dist_km": 10.0,
    "S_ESP": 86.4,
-   "S_BMS": 78.4,
-   "S_TMP": 100,
+   "S_BMS": 82.7,
+   "S_TMP": 91.0,
    "S_TER": 97.9,
    "e_raw": 33.74,
-   "e_norm": 13.03,
+   "e_norm": 12.43,
    "weights": {
     "ESP": 0.727,
     "BMS": 0.081,
     "TMP": 0.095,
     "TER": 0.097
    },
-   "drive_score": 88.1,
+   "drive_score": 87.6,
    "rating": "Good",
    "raw_score": 69.1
   },
@@ -222,18 +252,18 @@
    "condition": "hot-flat",
    "dist_km": 10.0,
    "S_ESP": 92.0,
-   "S_BMS": 89.8,
-   "S_TMP": 100,
-   "S_TER": 70.0,
+   "S_BMS": 93.3,
+   "S_TMP": 95.0,
+   "S_TER": 92.1,
    "e_raw": 15.14,
-   "e_norm": 11.43,
+   "e_norm": 10.94,
    "weights": {
     "ESP": 0.822,
     "BMS": 0.091,
     "TMP": 0.059,
     "TER": 0.027
    },
-   "drive_score": 91.7,
+   "drive_score": 92.3,
    "rating": "Excellent",
    "raw_score": 86.3
   },
@@ -243,8 +273,8 @@
    "dist_km": 10.0,
    "S_ESP": 76.3,
    "S_BMS": 61.3,
-   "S_TMP": 75.0,
-   "S_TER": 70.0,
+   "S_TMP": 74.8,
+   "S_TER": 74.8,
    "e_raw": 15.42,
    "e_norm": 15.42,
    "weights": {
@@ -253,7 +283,7 @@
     "TMP": 0.028,
     "TER": 0.028
    },
-   "drive_score": 74.7,
+   "drive_score": 74.8,
    "rating": "Balanced",
    "raw_score": 73.3
   },
@@ -262,18 +292,18 @@
    "condition": "mild-hilly",
    "dist_km": 10.0,
    "S_ESP": 73.2,
-   "S_BMS": 62.1,
-   "S_TMP": 75.0,
+   "S_BMS": 54.4,
+   "S_TMP": 71.4,
    "S_TER": 70.7,
    "e_raw": 21.17,
-   "e_norm": 15.3,
+   "e_norm": 16.38,
    "weights": {
     "ESP": 0.783,
     "BMS": 0.087,
     "TMP": 0.026,
     "TER": 0.104
    },
-   "drive_score": 72.1,
+   "drive_score": 71.3,
    "rating": "Balanced",
    "raw_score": 62.6
   },
@@ -282,18 +312,18 @@
    "condition": "cold-flat",
    "dist_km": 10.0,
    "S_ESP": 68.8,
-   "S_BMS": 51.0,
-   "S_TMP": 74.0,
-   "S_TER": 70.0,
+   "S_BMS": 50.4,
+   "S_TMP": 69.3,
+   "S_TER": 67.0,
    "e_raw": 32.77,
-   "e_norm": 16.86,
+   "e_norm": 16.95,
    "weights": {
     "ESP": 0.789,
     "BMS": 0.088,
     "TMP": 0.097,
     "TER": 0.026
    },
-   "drive_score": 67.8,
+   "drive_score": 67.2,
    "rating": "Balanced",
    "raw_score": 55.1
   },
@@ -302,18 +332,18 @@
    "condition": "cold-hilly",
    "dist_km": 10.0,
    "S_ESP": 65.7,
-   "S_BMS": 47.0,
-   "S_TMP": 74.1,
+   "S_BMS": 40.9,
+   "S_TMP": 66.9,
    "S_TER": 68.6,
    "e_raw": 39.65,
-   "e_norm": 17.42,
+   "e_norm": 18.27,
    "weights": {
     "ESP": 0.731,
     "BMS": 0.081,
     "TMP": 0.09,
     "TER": 0.098
    },
-   "drive_score": 65.2,
+   "drive_score": 64.0,
    "rating": "Balanced",
    "raw_score": 52.5
   },
@@ -323,8 +353,8 @@
    "dist_km": 10.0,
    "S_ESP": 76.3,
    "S_BMS": 61.3,
-   "S_TMP": 75.0,
-   "S_TER": 70.0,
+   "S_TMP": 74.9,
+   "S_TER": 74.8,
    "e_raw": 19.51,
    "e_norm": 15.41,
    "weights": {
@@ -333,7 +363,7 @@
     "TMP": 0.056,
     "TER": 0.028
    },
-   "drive_score": 74.7,
+   "drive_score": 74.8,
    "rating": "Balanced",
    "raw_score": 67.5
   },
@@ -343,17 +373,17 @@
    "dist_km": 10.0,
    "S_ESP": 36.7,
    "S_BMS": 0.0,
-   "S_TMP": 75.0,
-   "S_TER": 70.0,
+   "S_TMP": 33.0,
+   "S_TER": 33.0,
    "e_raw": 25.13,
-   "e_norm": 25.07,
+   "e_norm": 25.13,
    "weights": {
     "ESP": 0.849,
     "BMS": 0.094,
     "TMP": 0.028,
     "TER": 0.028
    },
-   "drive_score": 35.2,
+   "drive_score": 33.0,
    "rating": "Needs Improvement",
    "raw_score": 29.3
   },
@@ -363,17 +393,17 @@
    "dist_km": 10.0,
    "S_ESP": 33.5,
    "S_BMS": 0.0,
-   "S_TMP": 75.0,
+   "S_TMP": 30.2,
    "S_TER": 36.0,
    "e_raw": 32.21,
-   "e_norm": 25.0,
+   "e_norm": 27.59,
    "weights": {
     "ESP": 0.783,
     "BMS": 0.087,
     "TMP": 0.026,
     "TER": 0.104
    },
-   "drive_score": 31.9,
+   "drive_score": 30.8,
    "rating": "Needs Improvement",
    "raw_score": 26.8
   },
@@ -383,17 +413,17 @@
    "dist_km": 10.0,
    "S_ESP": 29.7,
    "S_BMS": 0.0,
-   "S_TMP": 62.7,
-   "S_TER": 70.0,
+   "S_TMP": 37.4,
+   "S_TER": 26.8,
    "e_raw": 43.06,
-   "e_norm": 26.62,
+   "e_norm": 26.8,
    "weights": {
     "ESP": 0.798,
     "BMS": 0.089,
     "TMP": 0.087,
     "TER": 0.027
    },
-   "drive_score": 31.0,
+   "drive_score": 27.7,
    "rating": "Needs Improvement",
    "raw_score": 23.8
   },
@@ -403,17 +433,17 @@
    "dist_km": 10.0,
    "S_ESP": 27.0,
    "S_BMS": 0.0,
-   "S_TMP": 62.3,
+   "S_TMP": 35.5,
    "S_TER": 38.3,
    "e_raw": 50.9,
-   "e_norm": 27.01,
+   "e_norm": 28.71,
    "weights": {
     "ESP": 0.739,
     "BMS": 0.082,
     "TMP": 0.08,
     "TER": 0.099
    },
-   "drive_score": 28.7,
+   "drive_score": 26.6,
    "rating": "Needs Improvement",
    "raw_score": 21.6
   },
@@ -423,17 +453,17 @@
    "dist_km": 10.0,
    "S_ESP": 36.7,
    "S_BMS": 0.0,
-   "S_TMP": 62.6,
-   "S_TER": 70.0,
+   "S_TMP": 41.8,
+   "S_TER": 33.0,
    "e_raw": 29.14,
-   "e_norm": 25.1,
+   "e_norm": 25.22,
    "weights": {
     "ESP": 0.831,
     "BMS": 0.092,
     "TMP": 0.049,
     "TER": 0.028
    },
-   "drive_score": 35.5,
+   "drive_score": 33.4,
    "rating": "Needs Improvement",
    "raw_score": 29.3
   }
