@@ -573,7 +573,7 @@ input[type=range].w { height: 22px; }
     var bmsTip = kinds.length ? "Consumption is high for these " + (kinds.length > 1 ? kinds.slice(0, -1).join(", ") + " and " + kinds[kinds.length - 1] : kinds[0]) + " conditions."
                            : "Consumption is high. Keep speed steadier.";
     var tips = {
-      esp: cf < 1 ? "Accelerate and brake more gently: the ECO limit is " + (0.10 * cf).toFixed(2) + " g here." : "Accelerate and brake more gently.",
+      esp: cf < 1 ? "Accelerate and brake more gently: the ECO limit is lower in these conditions." : "Accelerate and brake more gently.",
       bms: bmsTip,
       tmp: cold ? "Lower the heating a little and pre-heat while plugged in." : "Raise the cooling setpoint and pre-cool while plugged in.",
       ter: "Lift off earlier on descents and let regen slow the car."
