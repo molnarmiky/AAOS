@@ -265,6 +265,11 @@ input[type=range].w { height: 22px; }
           <div class="scale"><span>1 km</span><span>1000 km</span></div>
         </div>
         <div>
+          <div class="xrow"><label for="x-trip">Average trip length in the 200 and 1000 km windows</label><output id="o-trip" class="num"></output></div>
+          <input type="range" id="x-trip" min="2" max="200" step="1">
+          <div class="scale"><span>2 km (many short trips)</span><span>200 km (long trips)</span></div>
+        </div>
+        <div>
           <div class="xrow"><label for="x-cap">Energy recovered on descents (regen)</label><output id="o-cap" class="num"></output></div>
           <input type="range" id="x-cap" min="0" max="1" step="0.01">
           <div class="scale"><span>0% of available</span><span>100%</span></div>
@@ -277,7 +282,7 @@ input[type=range].w { height: 22px; }
         <label class="sw" for="x-conf"><span>Scale weights by data confidence, as in the validation script (off: weights apply exactly as set)</span><input type="checkbox" id="x-conf"></label>
       </div>
     </details>
-    <p class="note">Sub-scores follow the 10 km validation script. Speed is taken as 50 km/h average, vehicle 1950 kg, climb equals descent. The ESP slider is the typical peak acceleration of a manoeuvre; the sub-score interpolates the ECO, Normal, Sporty and Aggressive band values.</p>
+    <p class="note">Sub-scores follow the 10 km validation script. Speed is taken as 50 km/h average, vehicle 1950 kg, climb equals descent. Each cold start adds warm-up energy (up to 1.4 kWh at -10 °C) that the score removes; the longer windows count one cold start per average trip. The ESP slider is the typical peak acceleration of a manoeuvre; the sub-score interpolates the ECO, Normal, Sporty and Aggressive band values.</p>
         </div>
   </section>
 
@@ -323,6 +328,8 @@ input[type=range].w { height: 22px; }
   var lerp = function (t, a, b) { return a + (b - a) * t; };
   var M = 1950, G = 9.81, ETA = 0.88, SPEED = 50;
 
+  function eWarm(T) { return lerp(clamp((20 - T) / 30, 0, 1), 0.15, 1.40); }  // kWh per cold start: cabin + battery warm-up
+  var ZONE_KM = 3;  // first km of every trip left out of the climate-use ratio
   function pAux(T) { return T >= 20 ? 0.6 + 0.05 * (T - 20) : lerp(clamp((20 - T) / 30, 0, 1), 0.6, 2.2); }
   function fT(T) { return lerp(clamp((10 - T) / 20, 0, 1), 1.0, 1.10); }
   function etaR(T) { return lerp(clamp((10 - T) / 20, 0, 1), 0.75, 0.45); }
@@ -355,23 +362,28 @@ input[type=range].w { height: 22px; }
   };
 
   var S = {
-    acc: 0.15, cons: 15.4, temp: 20, hill: 0,
-    dist: 10, cap: 0.55, kappa: 1.0, conf: false,
+    acc: 0.15, cons: 16.9, temp: 20, hill: 0,
+    dist: 10, trip: 20, cap: 0.55, kappa: 1.0, conf: false,
     W: { esp: 60, bms: 20, tmp: 10, ter: 10 },
     tab: "trip", ltab: "formula"
   };
   var SCEN = [
-    { acc: 0.07, cons: 11.2, temp: 20, hill: 0, cap: 0.80, kappa: 0.85 },
-    { acc: 0.07, cons: 22.3, temp: -5, hill: 14, cap: 0.80, kappa: 0.85 },
-    { acc: 0.15, cons: 28.2, temp: -5, hill: 14, cap: 0.55, kappa: 1.00 },
-    { acc: 0.24, cons: 26.5, temp: 20, hill: 14, cap: 0.43, kappa: 1.02 },
-    { acc: 0.30, cons: 32.2, temp: 20, hill: 14, cap: 0.30, kappa: 1.05 }
+    { acc: 0.07, cons: 12.7, temp: 20, hill: 0, cap: 0.80, kappa: 0.85 },
+    { acc: 0.07, cons: 34.2, temp: -5, hill: 14, cap: 0.80, kappa: 0.85 },
+    { acc: 0.15, cons: 40.2, temp: -5, hill: 14, cap: 0.55, kappa: 1.00 },
+    { acc: 0.24, cons: 28.0, temp: 20, hill: 14, cap: 0.43, kappa: 1.02 },
+    { acc: 0.30, cons: 33.7, temp: 20, hill: 14, cap: 0.30, kappa: 1.05 }
   ];
 
-  function compute(st, d) {
+  function compute(st, d, n) {
+    n = n || 1;
     var T = st.temp, th = d / SPEED;
-    var eMeas = st.cons * d / 100;
-    var eAux = st.kappa * pAux(T) * th;
+    // the BMS slider is the measured consumption of the current trip (st.dist km, one cold start)
+    var eW = eWarm(T);
+    var steady = Math.max(3, st.cons - eW / st.dist * 100);          // kWh/100 km without the warm-up
+    var eMeas = steady * d / 100 + eW * n;                          // each trip start adds its warm-up
+    var tRun = Math.max(0, d - ZONE_KM * n) / SPEED;                // steady driving time, warm-up zone left out
+    var eAux = st.kappa * pAux(T) * th + eW * n;
     var h = st.hill * d;
     var eRegen = st.cap * M * G * ETA * etaR(T) * h / 3.6e6;
     var sE = sEsp(st.acc);
@@ -383,21 +395,21 @@ input[type=range].w { height: 22px; }
     var sB = 100 * clamp((24 - eNorm) / 14, 0, 1);
     // Temperature
     var dev = Math.abs(pAux(T) - pAux(20)) * th / d * 100;
-    var tAct = dev >= 0.3 && eAux > 0;
-    var kappa = eAux / (pAux(T) * th);
+    var tAct = dev >= 0.3 && eAux > 0 && tRun > 0;
+    var kappa = tAct ? st.kappa * pAux(T) * tRun / (pAux(T) * tRun) : 1;
     var sT = tAct ? clamp(75 - 250 * (kappa - 1), 0, 100) : 75;
     // Terrain
     var rAct = h >= 30;
     var avail = M * G * ETA * etaR(T) * h / 3.6e6;
     var sR = rAct && avail > 0 ? clamp(100 * (eRegen / avail) / 0.8, 0, 100) : 70;
     var Ssub = { esp: sE, bms: sB, tmp: sT, ter: sR };
-    var c = { esp: 1, bms: clamp(d / 30, 0.2, 1), tmp: tAct ? 1 : 0.2, ter: rAct ? 0.8 : 0.2 };
+    var c = { esp: 1, bms: clamp(d / 30, 0.2, 1), tmp: tAct ? clamp(tRun / 0.5, 0.2, 1) : 0.2, ter: rAct ? 0.8 : 0.2 };
     var w = {}, tot = 0;
     KEYS.forEach(function (k) { w[k] = st.W[k] * (st.conf ? c[k] : 1); tot += w[k]; });
     KEYS.forEach(function (k) { w[k] /= tot; });
     var ds = 0; KEYS.forEach(function (k) { ds += w[k] * Ssub[k]; });
     var iRaw = 100 * clamp((24 - st.cons) / 14, 0, 1);
-    return { S: Ssub, c: c, w: w, ds: ds, eNorm: eNorm, rawDs: 0.8 * sE + 0.2 * iRaw, act: { tmp: tAct, ter: rAct }, d: d, eRegen: eRegen };
+    return { S: Ssub, c: c, w: w, ds: ds, eNorm: eNorm, rawDs: 0.8 * sE + 0.2 * iRaw, act: { tmp: tAct, ter: rAct }, d: d, eRegen: eRegen, eRaw: eMeas / d * 100, eW: eW * n, n: n };
   }
 
   // ---------- weights: keep sum 100, each >= 1
@@ -421,18 +433,18 @@ input[type=range].w { height: 22px; }
   var $ = function (id) { return document.getElementById(id); };
   var CFG = {
     esp: { id: "esp", min: 0.03, max: 0.40, step: 0.005, get: function () { return S.acc; }, set: function (v) { S.acc = v; } },
-    bms: { id: "bms", min: 8, max: 40, step: 0.1, get: function () { return S.cons; }, set: function (v) { S.cons = v; } },
+    bms: { id: "bms", min: 8, max: 60, step: 0.1, get: function () { return S.cons; }, set: function (v) { S.cons = v; } },
     tmp: { id: "tmp", min: -20, max: 40, step: 1, get: function () { return S.temp; }, set: function (v) { S.temp = v; } },
     ter: { id: "ter", min: 0, max: 50, step: 1, get: function () { return S.hill; }, set: function (v) { S.hill = v; } }
   };
   var DESC = {
     esp: "Typical peak acceleration of a manoeuvre, from the ESP accelerometer.",
-    bms: "Measured battery consumption over the window, before any correction.",
+    bms: "Measured consumption of this trip, including the energy to warm up the cabin and battery at the start.",
     tmp: "Outside temperature from the vehicle sensor.",
     ter: "Climb per km along the route (descent equals climb). 10 m/km is about 1% average grade."
   };
   var SCALE = {
-    esp: ["0.03 g", "0.40 g"], bms: ["8", "40 kWh/100 km"], tmp: ["−20 °C", "40 °C"], ter: ["0 m/km flat", "50 m/km"]
+    esp: ["0.03 g", "0.40 g"], bms: ["8", "60 kWh/100 km"], tmp: ["−20 °C", "40 °C"], ter: ["0 m/km flat", "50 m/km"]
   };
 
   function fill(el) { el.style.setProperty("--p", ((el.value - el.min) / (el.max - el.min) * 100) + "%"); }
@@ -477,6 +489,7 @@ input[type=range].w { height: 22px; }
       $("val-" + k).innerHTML = fmtVal(k);
     });
     $("x-dist").value = S.dist; fill($("x-dist")); $("o-dist").textContent = S.dist + " km";
+    $("x-trip").value = S.trip; fill($("x-trip")); $("o-trip").textContent = S.trip + " km";
     $("x-cap").value = S.cap; fill($("x-cap")); $("o-cap").textContent = Math.round(S.cap * 100) + "%";
     $("x-kap").value = S.kappa; fill($("x-kap")); $("o-kap").textContent = S.kappa.toFixed(2) + "×";
     $("x-conf").checked = S.conf;
@@ -493,7 +506,7 @@ input[type=range].w { height: 22px; }
     // per-card results
     var e = r.eNorm;
     $("res-esp").innerHTML = '<span>Sub-score <b class="num">' + r.S.esp.toFixed(0) + '</b></span><span>Weight <b class="num">' + S.W.esp + '% → ' + (r.w.esp * 100).toFixed(0) + '%</b></span><span>Adds <b class="num">' + pts(r.w.esp * r.S.esp) + ' pts</b></span>';
-    $("res-bms").innerHTML = '<span>Normalised <b class="num">' + e.toFixed(1) + ' kWh/100 km</b></span><span>Sub-score <b class="num">' + r.S.bms.toFixed(0) + '</b></span><span>Weight <b class="num">' + S.W.bms + '% → ' + (r.w.bms * 100).toFixed(0) + '%</b></span><span>Adds <b class="num">' + pts(r.w.bms * r.S.bms) + ' pts</b></span><span class="st ' + (r.c.bms >= 1 ? "on" : "off") + '">confidence ' + Math.round(r.c.bms * 100) + '% at ' + S.dist + ' km</span>';
+    $("res-bms").innerHTML = '<span>Normalised <b class="num">' + e.toFixed(1) + ' kWh/100 km</b></span><span>Sub-score <b class="num">' + r.S.bms.toFixed(0) + '</b></span><span>Weight <b class="num">' + S.W.bms + '% → ' + (r.w.bms * 100).toFixed(0) + '%</b></span><span>Adds <b class="num">' + pts(r.w.bms * r.S.bms) + ' pts</b></span><span>Warm-up in this trip <b class="num">' + r.eW.toFixed(2) + ' kWh (' + (r.eW / S.dist * 100).toFixed(1) + ' per 100 km)</b></span><span class="st ' + (r.c.bms >= 1 ? "on" : "off") + '">confidence ' + Math.round(r.c.bms * 100) + '% at ' + S.dist + ' km</span>';
     $("res-tmp").innerHTML = '<span class="st ' + (r.act.tmp ? "on" : "off") + '">' + (r.act.tmp ? "Active" : "Neutral, little climate load") + '</span><span>Sub-score <b class="num">' + r.S.tmp.toFixed(0) + '</b></span><span>Weight <b class="num">' + S.W.tmp + '% → ' + (r.w.tmp * 100).toFixed(0) + '%</b></span><span>Adds <b class="num">' + pts(r.w.tmp * r.S.tmp) + ' pts</b></span>';
     $("res-ter").innerHTML = '<span class="st ' + (r.act.ter ? "on" : "off") + '">' + (r.act.ter ? "Active" : "Neutral, under 30 m of descent") + '</span><span>Sub-score <b class="num">' + r.S.ter.toFixed(0) + '</b></span><span>Weight <b class="num">' + S.W.ter + '% → ' + (r.w.ter * 100).toFixed(0) + '%</b></span><span>Adds <b class="num">' + pts(r.w.ter * r.S.ter) + ' pts</b></span>';
 
@@ -502,7 +515,8 @@ input[type=range].w { height: 22px; }
 
   function renderWindow() {
     var d = S.tab === "trip" ? S.dist : S.tab === "w200" ? 200 : 1000;
-    var r = compute(S, d);
+    var n = S.tab === "trip" ? 1 : Math.max(1, Math.ceil(d / S.trip));
+    var r = compute(S, d, n);
     $("wCov").textContent = d + " km" + (S.tab === "trip" ? " · " + Math.round(d / SPEED * 60) + " min" : "");
     var sh = shares(S.acc), nm = ["ECO", "Normal", "Sporty", "Aggressive"], cl = ["var(--good)", "var(--c-nor)", "var(--warn)", "var(--bad)"];
     $("bandBar").innerHTML = sh.map(function (v, i) { return '<i style="width:' + (v * 100).toFixed(1) + '%;background:' + cl[i] + '"></i>'; }).join("");
@@ -512,7 +526,7 @@ input[type=range].w { height: 22px; }
     $("tEff").textContent = Math.round(r.S.bms) + "%";
     $("tEffS").textContent = r.eNorm.toFixed(1) + " kWh/100 km in standard conditions";
     var pack = 75 * 0.82;
-    $("tRange").textContent = Math.round(pack / S.cons * 100) + " km";
+    $("tRange").textContent = Math.round(pack / r.eRaw * 100) + " km";
     var band = bandOf(S.acc);
     $("tStyle").textContent = band === "ECO" ? "Efficient Driver" : band === "Normal" ? "Balanced Driver" : "Dynamic Driver";
     $("tStyleS").textContent = "Typical peak " + S.acc.toFixed(2) + " g · " + band + " band";
@@ -524,7 +538,7 @@ input[type=range].w { height: 22px; }
       ter: "Little energy is recovered on descents. Lift off earlier and let regen slow the car."
     };
     $("wSug").textContent = r.ds >= 90 ? "Excellent. Keep this driving style." : tips[low];
-    $("wHint").textContent = S.tab === "trip" ? "Driven by the Formula Test sliders on the left." : "Window average of the Formula Test inputs. Longer windows give the BMS full weight.";
+    $("wHint").textContent = "Measured consumption in this window: " + r.eRaw.toFixed(1) + " kWh/100 km with " + n + (n === 1 ? " cold start" : " cold starts") + " (" + (r.eW / d * 100).toFixed(1) + " kWh/100 km of warm-up). Normalised: " + r.eNorm.toFixed(1) + ".";
   }
 
   function setTab(t) {
@@ -553,6 +567,7 @@ input[type=range].w { height: 22px; }
     b.addEventListener("click", function () { var s = SCEN[+b.dataset.sc]; for (var k in s) S[k] = s[k]; render(); });
   });
   $("x-dist").addEventListener("input", function (e) { S.dist = parseInt(e.target.value, 10); render(); });
+  $("x-trip").addEventListener("input", function (e) { S.trip = parseInt(e.target.value, 10); render(); });
   $("x-cap").addEventListener("input", function (e) { S.cap = parseFloat(e.target.value); render(); });
   $("x-kap").addEventListener("input", function (e) { S.kappa = parseFloat(e.target.value); render(); });
   $("x-conf").addEventListener("change", function (e) { S.conf = e.target.checked; render(); });

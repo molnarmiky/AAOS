@@ -30,6 +30,9 @@ def f_T(T):              # cold-driveline factor on traction energy
 def eta_r(T):            # regen round-trip efficiency vs battery temperature
     return lerp(clamp((10 - T) / 20.0, 0, 1), 0.75, 0.45)
 
+def e_warm(T):           # kWh once per trip start: cabin pull-down/heat-up and battery conditioning (non-traction)
+    return lerp(clamp((20 - T) / 30.0, 0, 1), 0.15, 1.40)
+
 def crr(T):
     return lerp(clamp((10 - T) / 20.0, 0, 1), 0.009, 0.0105)
 
@@ -46,12 +49,13 @@ E_BEST, E_WORST = 10.0, 24.0         # kWh/100km normalised: 100 pts / 0 pts
 NEUTRAL = {"TMP": 75.0, "TER": 70.0}
 TEMP_ACTIVE_KWH100 = 0.3
 TER_ACTIVE_DOWN_M = 30.0
+WARM_ZONE_KM = 3                      # km at the start of every trip excluded from the climate-use ratio
 CAPTURE_REF = 0.8
 
 class Bucket:
     """One km of driving; the only data stored (no timestamp, no position)."""
     FIELDS = ["dist_km", "dur_s", "temp_c", "e_meas_kwh", "e_aux_kwh", "h_up_m", "h_down_m",
-              "e_regen_down_kwh", "dv_total", "dv_weighted"]
+              "e_regen_down_kwh", "dv_total", "dv_weighted", "n_trips", "e_aux_run_kwh", "dur_run_s"]
     def __init__(self, **kw):
         for f in self.FIELDS: setattr(self, f, kw.get(f))
     def dict(self): return {f: getattr(self, f) for f in self.FIELDS}
@@ -92,14 +96,15 @@ def score(a, have=("ESP", "BMS", "TMP", "TER"), params=None):
         s_bms = 100.0 * clamp((E_WORST - e_norm) / (E_WORST - E_BEST), 0, 1)
     if a["e_meas_kwh"] > 0:
         e_raw = a["e_meas_kwh"] / d * 100.0
-    # --- Temperature: driver's climate-use factor
-    t_active = False; s_tmp = NEUTRAL["TMP"]
+    # --- Temperature: driver's climate-use factor, measured on steady driving only.
+    # The first WARM_ZONE_KM of every trip (cabin and battery warm-up) are left out of this ratio.
+    t_active = False; s_tmp = NEUTRAL["TMP"]; t_run = (a["dur_run_s"] or 0.0) / 3600.0
     if "TMP" in have and T is not None:
         t_h = a["dur_s"] / 3600.0
         dev = abs(p["aux"] * (p_aux(T) - p_aux(20.0))) * t_h / d * 100.0
-        t_active = dev >= TEMP_ACTIVE_KWH100 and a["e_aux_kwh"] > 0
+        t_active = dev >= TEMP_ACTIVE_KWH100 and a["e_aux_kwh"] > 0 and t_run > 0
         if t_active:
-            kappa = a["e_aux_kwh"] / (p["aux"] * p_aux(T) * t_h)
+            kappa = a["e_aux_run_kwh"] / (p["aux"] * p_aux(T) * t_run)
             s_tmp = clamp(75.0 - 250.0 * (kappa - 1.0), 0, 100)
     # --- Terrain: regen capture on descents
     r_active = False; s_ter = NEUTRAL["TER"]
@@ -111,7 +116,8 @@ def score(a, have=("ESP", "BMS", "TMP", "TER"), params=None):
     # --- confidence and weights (all > 0)
     c = {"ESP": 1.0 if s_esp is not None else FLOOR,
          "BMS": clamp(d / 30.0, FLOOR, 1.0) if s_bms is not None else FLOOR,
-         "TMP": 1.0 if t_active else FLOOR,
+         # climate-use score needs enough steady driving time (warm-up dominates short trips): full at 30 min
+         "TMP": clamp(t_run / 0.5, FLOOR, 1.0) if t_active else FLOOR,
          "TER": (0.8 if r_active else FLOOR)}
     raw_w = {k: BASE_W[k] * c[k] for k in BASE_W}
     tot = sum(raw_w.values())
@@ -145,7 +151,16 @@ CONDITIONS = {
 }
 EDGES = [(0.04, 0.10), (0.10, 0.20), (0.20, 0.30), (0.30, 0.45)]
 
-def simulate(profile, cond, seed=7):
+WARM_SHARE = (0.60, 0.25, 0.15)      # warm-up energy decays over the first three km of a trip
+
+def add_warmup(bs, T):
+    """Cold start: warm-up energy (cabin + battery) lands in the first km of the trip, once."""
+    ew = e_warm(T)
+    for i in range(WARM_ZONE_KM):
+        bs[i].e_meas_kwh += ew * WARM_SHARE[i]; bs[i].e_aux_kwh += ew * WARM_SHARE[i]
+    bs[0].n_trips = 1.0
+
+def simulate(profile, cond, seed=7, warm=True):
     pr, co = PROFILES[profile], CONDITIONS[cond]
     # maneuvers: own RNG, independent of conditions -> S_ESP identical across conditions
     rm = random.Random(f"{seed}-{profile}-man")
@@ -190,7 +205,27 @@ def simulate(profile, cond, seed=7):
                               h_up_m=n8(up) if up else 0.0, h_down_m=n8(down) if down else 0.0,
                               e_regen_down_kwh=e_regen_down / 3.6e6 * (1 + rn.gauss(0, 0.01)),
                               dv_total=dv_tot, dv_weighted=dv_w))
+    for b in buckets: b.n_trips = 0.0
+    if warm: add_warmup(buckets, T)              # one cold start at the beginning of the trip
+    finish(buckets, warm)
     return buckets
+
+def finish(bs, starts_trip):
+    """Mark the buckets in the warm-up zone and fill the steady-state aux fields."""
+    for i, b in enumerate(bs):
+        in_zone = starts_trip and i < WARM_ZONE_KM
+        b.e_aux_run_kwh = 0.0 if in_zone else b.e_aux_kwh
+        b.dur_run_s = 0.0 if in_zone else b.dur_s
+
+def window(profile, cond, total_km, trip_km, seed=7):
+    """total_km of driving made of trips of trip_km each (10 km pattern repeated); every trip pays its own warm-up."""
+    import copy
+    base = simulate(profile, cond, seed, warm=False); T = CONDITIONS[cond]["T"]; out = []
+    for i in range(total_km // 10):
+        bs = copy.deepcopy(base); start = (i * 10) % trip_km == 0
+        if start: add_warmup(bs, T)
+        finish(bs, start); out += bs
+    return out
 
 # ------------------------------------------------------------------ 4. validation
 RESULTS = {"tests": [], "table": [], "vectors": []}
@@ -275,6 +310,21 @@ def run():
     # T11 sanity of e_norm
     mf = grid[("Normal", "mild-flat")][2]["e_norm"]
     check("T11 normalised consumption plausible (Normal, mild flat 9-20 kWh/100 km)", 9 <= mf <= 20, f"{mf:.2f}")
+    # T12-T14 warm-up: a short trip pays for heating the cabin and the battery, a long trip pays once
+    raw_ok = norm_ok = same_ok = True; maxd10 = 0.0; maxsame = 0.0; maxnorm = 0.0; minratio = 9.0
+    for pf in PROFILES:
+        for cd in ("cold-flat", "cold-hilly"):
+            r10 = grid[(pf, cd)][2]
+            r200 = score(aggregate(window(pf, cd, 200, 200)))
+            r20 = score(aggregate(window(pf, cd, 200, 10)))
+            minratio = min(minratio, r10["e_raw"] / r200["e_raw"])
+            maxnorm = max(maxnorm, abs(r10["e_norm"] - r200["e_norm"]))
+            maxsame = max(maxsame, abs(r20["drive_score"] - r200["drive_score"]))
+            maxd10 = max(maxd10, abs(r10["drive_score"] - r200["drive_score"]))
+    check("T12 cold short trip uses >= 20 % more energy per km than one long trip (warm-up), measured consumption", minratio >= 1.2, f"10 km / 200 km consumption ratio, minimum {minratio:.2f}")
+    check("T13 normalised consumption is the same for a 10 km trip and a 200 km trip (warm-up removed)", maxnorm < 0.15, f"max difference {maxnorm:.2f} kWh/100 km")
+    check("T14 200 km as one trip and as 20 short trips give the same Drive Score (<= 1 pt)", maxsame <= 1.0, f"max difference {maxsame:.2f} pts")
+    check("T15 10 km versus 200 km Drive Score differs <= 6 pts (only the weights move with data volume)", maxd10 <= 6.0, f"max difference {maxd10:.1f} pts")
     return grid
 
 def export(grid):
@@ -288,7 +338,14 @@ def export(grid):
         vec.append(dict(id=f"{pf}/{cd}", buckets=[b.dict() for b in bs],
                         expected=dict(S=r["S"], weights=r["w"], drive_score=r["drive_score"],
                                       e_norm=r["e_norm"], rating=rating(r["drive_score"])), tolerance=1e-6))
-    json.dump(vec, open(os.path.join(HERE, "testvectors.json"), "w"), indent=1)
+    wins = []
+    for pf in ("Eco", "Normal", "Aggressive"):
+        for cd in ("mild-flat", "cold-hilly"):
+            for total, trip in ((200, 200), (200, 10), (1000, 200)):
+                a = aggregate(window(pf, cd, total, trip)); r = score(a)
+                wins.append(dict(id=f"{pf}/{cd}/{total}km-in-{total // trip}-trips", window=a,
+                                 expected=dict(S=r["S"], weights=r["w"], drive_score=r["drive_score"], e_raw=r["e_raw"], e_norm=r["e_norm"]), tolerance=1e-6))
+    json.dump(dict(trips=vec, windows=wins), open(os.path.join(HERE, "testvectors.json"), "w"), indent=1)
     json.dump(RESULTS, open(os.path.join(HERE, "validation_results.json"), "w"), indent=1)
 
 if __name__ == "__main__":
