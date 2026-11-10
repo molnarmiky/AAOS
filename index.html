@@ -568,22 +568,15 @@ input[type=range].w { height: 22px; }
     var live = KEYS.filter(function (k) { return k === "esp" || k === "bms" || (k === "tmp" && r.act.tmp) || (k === "ter" && r.act.ter); });
     var low = live.slice().sort(function (a, b) { return r.w[b] * (100 - r.S[b]) - r.w[a] * (100 - r.S[a]); })[0];
     var cf = ctxF(S.temp, S.hill), cold = S.temp < 17, hot = S.temp > 23, hilly = S.hill >= 5;
-    function cnd() {
-      var l = [];
-      if (cold) l.push("cold " + tTxt(S.temp)); else if (hot) l.push("hot " + tTxt(S.temp));
-      if (hilly) l.push("hills of " + slopeTxt(S.hill));
-      if (r.perWarm >= 1) l.push(n === 1 ? "a cold start in a " + dTxt(d) + " trip" : n + " cold starts");
-      return l.length ? l.join(", ") : "mild weather on flat road";
-    }
     var kinds = [];
     if (cold || hot) kinds.push("temperature"); if (hilly) kinds.push("terrain"); if (r.perWarm >= 1) kinds.push("short-trip");
     var bmsTip = kinds.length ? "Consumption is high for these " + (kinds.length > 1 ? kinds.slice(0, -1).join(", ") + " and " + kinds[kinds.length - 1] : kinds[0]) + " conditions."
-                           : "Consumption is high. Keep speed steadier and anticipate traffic.";
+                           : "Consumption is high. Keep speed steadier.";
     var tips = {
-      esp: "Smoother acceleration and braking moves more manoeuvres into the ECO band" + (cf < 1 ? ". With " + cnd() + " the ECO limit is " + (0.10 * cf).toFixed(2) + " g instead of 0.10 g, so ease off earlier than on a dry, flat road." : "."),
+      esp: cf < 1 ? "Accelerate and brake more gently: the ECO limit is " + (0.10 * cf).toFixed(2) + " g here." : "Accelerate and brake more gently.",
       bms: bmsTip,
-      tmp: "Climate use is above typical at " + tTxt(S.temp) + ". " + (cold ? "Lower the set temperature by 1 to 2 °C (" + (IMP ? "2 to 4 °F" : "1 to 2 K") + "), use seat heating and pre-heat while plugged in." : "Raise the set temperature a little, use recirculation and pre-cool while plugged in."),
-      ter: "Only " + Math.round(S.cap * 100) + "% of the energy available on the descents (" + slopeTxt(S.hill) + " over " + dTxt(d) + ") is recovered. Lift off earlier and let regen slow the car."
+      tmp: cold ? "Lower the heating a little and pre-heat while plugged in." : "Raise the cooling setpoint and pre-cool while plugged in.",
+      ter: "Lift off earlier on descents and let regen slow the car."
     };
     $("wSug").textContent = r.ds >= 90 ? "Excellent. Keep this driving style." : tips[low];
     $("wHint").textContent = "Measured consumption in this window: " + eTxt(r.eRaw) + " with " + n + (n === 1 ? " cold start" : " cold starts") + " (" + eTxt(r.eW / d * 100) + " of warm-up). Normalised: " + eV(r.eNorm).toFixed(1) + "." + (S.tab !== "trip" && !S.conf ? " The same inputs are assumed over the whole window, so the score changes between windows only through data confidence (switch it on under More inputs)." : "");
