@@ -1,0 +1,332 @@
+{
+ "tests": [
+  {
+   "name": "T1 every weight > 0 in all 12 trips",
+   "passed": true,
+   "detail": "min weight 0.025"
+  },
+  {
+   "name": "T2 weights sum to 1",
+   "passed": true,
+   "detail": ""
+  },
+  {
+   "name": "T3 S_ESP identical across conditions (same driver, same manoeuvres)",
+   "passed": true,
+   "detail": ""
+  },
+  {
+   "name": "T4 Drive Score ordering Eco > Normal > Aggressive in every condition",
+   "passed": true,
+   "detail": ""
+  },
+  {
+   "name": "T5 Eco: consumption spread across the 4 conditions shrinks after normalisation (kWh/100 km)",
+   "passed": true,
+   "detail": "raw 11.2 -> normalised 1.7"
+  },
+  {
+   "name": "T5 Eco: Drive Score spread across conditions <= 6 pts (same driver)",
+   "passed": true,
+   "detail": "v1.0-style raw score 15.9 pts -> Drive Score 1.7 pts"
+  },
+  {
+   "name": "T5 Normal: consumption spread across the 4 conditions shrinks after normalisation (kWh/100 km)",
+   "passed": true,
+   "detail": "raw 12.8 -> normalised 2.1"
+  },
+  {
+   "name": "T5 Normal: Drive Score spread across conditions <= 6 pts (same driver)",
+   "passed": true,
+   "detail": "v1.0-style raw score 12.3 pts -> Drive Score 1.6 pts"
+  },
+  {
+   "name": "T5 Aggressive: consumption spread across the 4 conditions shrinks after normalisation (kWh/100 km)",
+   "passed": true,
+   "detail": "raw 14.4 -> normalised 2.0"
+  },
+  {
+   "name": "T5 Aggressive: Drive Score spread across conditions <= 6 pts (same driver)",
+   "passed": true,
+   "detail": "v1.0-style raw score 0.0 pts -> Drive Score 3.3 pts"
+  },
+  {
+   "name": "T6 window additivity (sum of 2x5 km buckets == 10 km window)",
+   "passed": true,
+   "detail": ""
+  },
+  {
+   "name": "T7 +-20 % model error (mass, aux, regen eff.): ordering kept",
+   "passed": true,
+   "detail": ""
+  },
+  {
+   "name": "T7b +-20 % model error: Drive Score moves <= 10 pts (worst corner of 8 combinations)",
+   "passed": true,
+   "detail": "max shift 8.5 pts"
+  },
+  {
+   "name": "T8 missing-source fallbacks keep all weights > 0 and a finite score",
+   "passed": true,
+   "detail": "no BMS: 75.0; no temperature: 72.9; no terrain: 73.4; ESP only: 75.7"
+  },
+  {
+   "name": "T9 inactive conditions give neutral sub-scores and floor weight",
+   "passed": true,
+   "detail": ""
+  },
+  {
+   "name": "T10 deterministic (same seed -> same score)",
+   "passed": true,
+   "detail": ""
+  },
+  {
+   "name": "T11 normalised consumption plausible (Normal, mild flat 9-20 kWh/100 km)",
+   "passed": true,
+   "detail": "15.42"
+  }
+ ],
+ "table": [
+  {
+   "profile": "Eco",
+   "condition": "mild-flat",
+   "dist_km": 10.0,
+   "S_ESP": 92.0,
+   "S_BMS": 90.0,
+   "S_TMP": 75.0,
+   "S_TER": 70.0,
+   "e_raw": 11.18,
+   "e_norm": 11.41,
+   "weights": {
+    "ESP": 0.849,
+    "BMS": 0.094,
+    "TMP": 0.028,
+    "TER": 0.028
+   },
+   "drive_score": 90.7,
+   "rating": "Excellent",
+   "raw_score": 91.9
+  },
+  {
+   "profile": "Eco",
+   "condition": "mild-hilly",
+   "dist_km": 10.0,
+   "S_ESP": 92.0,
+   "S_BMS": 90.5,
+   "S_TMP": 75.0,
+   "S_TER": 100,
+   "e_raw": 15.72,
+   "e_norm": 11.33,
+   "weights": {
+    "ESP": 0.783,
+    "BMS": 0.087,
+    "TMP": 0.026,
+    "TER": 0.104
+   },
+   "drive_score": 92.3,
+   "rating": "Excellent",
+   "raw_score": 85.4
+  },
+  {
+   "profile": "Eco",
+   "condition": "cold-flat",
+   "dist_km": 10.0,
+   "S_ESP": 92.0,
+   "S_BMS": 80.9,
+   "S_TMP": 100,
+   "S_TER": 70.0,
+   "e_raw": 16.28,
+   "e_norm": 12.67,
+   "weights": {
+    "ESP": 0.763,
+    "BMS": 0.085,
+    "TMP": 0.127,
+    "TER": 0.025
+   },
+   "drive_score": 91.5,
+   "rating": "Excellent",
+   "raw_score": 84.6
+  },
+  {
+   "profile": "Eco",
+   "condition": "cold-hilly",
+   "dist_km": 10.0,
+   "S_ESP": 92.0,
+   "S_BMS": 78.4,
+   "S_TMP": 100,
+   "S_TER": 97.9,
+   "e_raw": 22.33,
+   "e_norm": 13.03,
+   "weights": {
+    "ESP": 0.709,
+    "BMS": 0.079,
+    "TMP": 0.118,
+    "TER": 0.094
+   },
+   "drive_score": 92.4,
+   "rating": "Excellent",
+   "raw_score": 76.0
+  },
+  {
+   "profile": "Normal",
+   "condition": "mild-flat",
+   "dist_km": 10.0,
+   "S_ESP": 76.3,
+   "S_BMS": 61.3,
+   "S_TMP": 75.0,
+   "S_TER": 70.0,
+   "e_raw": 15.42,
+   "e_norm": 15.42,
+   "weights": {
+    "ESP": 0.849,
+    "BMS": 0.094,
+    "TMP": 0.028,
+    "TER": 0.028
+   },
+   "drive_score": 74.7,
+   "rating": "Balanced",
+   "raw_score": 73.3
+  },
+  {
+   "profile": "Normal",
+   "condition": "mild-hilly",
+   "dist_km": 10.0,
+   "S_ESP": 76.3,
+   "S_BMS": 62.1,
+   "S_TMP": 75.0,
+   "S_TER": 70.7,
+   "e_raw": 21.17,
+   "e_norm": 15.3,
+   "weights": {
+    "ESP": 0.783,
+    "BMS": 0.087,
+    "TMP": 0.026,
+    "TER": 0.104
+   },
+   "drive_score": 74.5,
+   "rating": "Balanced",
+   "raw_score": 65.1
+  },
+  {
+   "profile": "Normal",
+   "condition": "cold-flat",
+   "dist_km": 10.0,
+   "S_ESP": 76.3,
+   "S_BMS": 51.0,
+   "S_TMP": 74.1,
+   "S_TER": 70.0,
+   "e_raw": 21.36,
+   "e_norm": 16.86,
+   "weights": {
+    "ESP": 0.763,
+    "BMS": 0.085,
+    "TMP": 0.127,
+    "TER": 0.025
+   },
+   "drive_score": 73.7,
+   "rating": "Balanced",
+   "raw_score": 64.8
+  },
+  {
+   "profile": "Normal",
+   "condition": "cold-hilly",
+   "dist_km": 10.0,
+   "S_ESP": 76.3,
+   "S_BMS": 47.0,
+   "S_TMP": 74.2,
+   "S_TER": 68.6,
+   "e_raw": 28.24,
+   "e_norm": 17.42,
+   "weights": {
+    "ESP": 0.709,
+    "BMS": 0.079,
+    "TMP": 0.118,
+    "TER": 0.094
+   },
+   "drive_score": 73.0,
+   "rating": "Balanced",
+   "raw_score": 61.0
+  },
+  {
+   "profile": "Aggressive",
+   "condition": "mild-flat",
+   "dist_km": 10.0,
+   "S_ESP": 36.7,
+   "S_BMS": 0.0,
+   "S_TMP": 75.0,
+   "S_TER": 70.0,
+   "e_raw": 25.13,
+   "e_norm": 25.07,
+   "weights": {
+    "ESP": 0.849,
+    "BMS": 0.094,
+    "TMP": 0.028,
+    "TER": 0.028
+   },
+   "drive_score": 35.2,
+   "rating": "Needs Improvement",
+   "raw_score": 29.3
+  },
+  {
+   "profile": "Aggressive",
+   "condition": "mild-hilly",
+   "dist_km": 10.0,
+   "S_ESP": 36.7,
+   "S_BMS": 0.0,
+   "S_TMP": 75.0,
+   "S_TER": 36.0,
+   "e_raw": 32.21,
+   "e_norm": 25.0,
+   "weights": {
+    "ESP": 0.783,
+    "BMS": 0.087,
+    "TMP": 0.026,
+    "TER": 0.104
+   },
+   "drive_score": 34.4,
+   "rating": "Needs Improvement",
+   "raw_score": 29.3
+  },
+  {
+   "profile": "Aggressive",
+   "condition": "cold-flat",
+   "dist_km": 10.0,
+   "S_ESP": 36.7,
+   "S_BMS": 0.0,
+   "S_TMP": 62.7,
+   "S_TER": 70.0,
+   "e_raw": 31.65,
+   "e_norm": 26.62,
+   "weights": {
+    "ESP": 0.763,
+    "BMS": 0.085,
+    "TMP": 0.127,
+    "TER": 0.025
+   },
+   "drive_score": 37.7,
+   "rating": "Needs Improvement",
+   "raw_score": 29.3
+  },
+  {
+   "profile": "Aggressive",
+   "condition": "cold-hilly",
+   "dist_km": 10.0,
+   "S_ESP": 36.7,
+   "S_BMS": 0.0,
+   "S_TMP": 62.3,
+   "S_TER": 38.3,
+   "e_raw": 39.49,
+   "e_norm": 27.01,
+   "weights": {
+    "ESP": 0.709,
+    "BMS": 0.079,
+    "TMP": 0.118,
+    "TER": 0.094
+   },
+   "drive_score": 36.9,
+   "rating": "Needs Improvement",
+   "raw_score": 29.3
+  }
+ ],
+ "vectors": []
+}

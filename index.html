@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#06090f">
+<meta name="description" content="Driving Insights formula simulator: ESP acceleration, BMS consumption, temperature and terrain with adjustable weights.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b63ff'/%3E%3Cpath d='M6 22a10 10 0 1 1 20 0' fill='none' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3Cpath d='M16 22l5-8' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+<title>Driving Insights Simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<style>
+/* Single dark look on purpose, to match the head-unit demo.
+   Layout: head-unit screen. Left column = Vehicle Dynamics controls, right panel = Driving Insights with tabs
+   (Current Trip / Last 200 km / Last 1000 km / Formula Test). Stacks to one column on narrow screens. */
+:root {
+  color-scheme: dark;
+  --bg: #06090f;
+  --panel: #0c121d;
+  --card: #111722;
+  --card-hi: #161e2d;
+  --line: #222c40;
+  --fg: #f1f4fa;
+  --mut: #9aa6bd;
+  --dim: #6d7a94;
+  --accent: #0b63ff;
+  --accent-fg: #ffffff;
+  --accent-text: #3b8bff;
+  --track: #263049;
+  --c-esp: #3b8bff;
+  --c-bms: #34d399;
+  --c-tmp: #fbbf24;
+  --c-ter: #a78bfa;
+  --c-nor: #38bdf8;
+  --good: #34d399;
+  --warn: #fbbf24;
+  --bad: #fb7185;
+  --font: "Inter", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font); line-height: 1.35;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 14px 16px;
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+.num { font-variant-numeric: tabular-nums; }
+
+.status { display: flex; justify-content: space-between; align-items: center; color: var(--mut); font-size: 15px; }
+.status .r { display: flex; gap: 14px; align-items: center; }
+h1 { margin: 6px 0 14px; font-size: clamp(30px, 4.2vw, 48px); font-weight: 700; letter-spacing: -0.02em; }
+
+.screen { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 28px; align-items: start; }
+.left { min-width: 0; }
+.right { min-width: 0; position: sticky; top: 12px; }
+
+.pills { display: flex; border-radius: 999px; background: var(--card); border: 1px solid var(--line); padding: 0; overflow: hidden; }
+.pills button { flex: 1; border: 0; background: transparent; color: var(--mut); padding: 12px 8px; font-size: 16px; border-radius: 999px; min-width: 0; }
+.pills button[aria-selected="true"], .pills button.on { background: var(--accent); color: var(--accent-fg); }
+.left .pills { max-width: 560px; }
+
+.group { margin-top: 20px; }
+.group h2 { margin: 0; font-size: 24px; font-weight: 700; }
+.group p { margin: 2px 0 10px; color: var(--mut); font-size: 15px; }
+.opts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.opt { background: var(--card); border: 1px solid var(--line); border-radius: 14px; min-height: 104px; padding: 10px 12px; text-align: center; display: flex; flex-direction: column; justify-content: center; gap: 6px; }
+.opt b { font-size: 20px; font-weight: 600; }
+.opt span { font-size: 13px; color: var(--mut); }
+.opt.on { background: var(--accent); border-color: var(--accent); }
+.opt.on span { color: #e4edff; }
+.opt.on b { color: #fff; }
+
+.dock { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 12px; display: flex; justify-content: space-between; align-items: center; color: var(--mut); font-size: 20px; gap: 12px; }
+.dock svg { width: 26px; height: 26px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.dock .home { color: var(--accent-text); }
+.dock .ic { display: flex; gap: 22px; align-items: center; }
+
+/* Right panel */
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 22px; padding: 22px 22px 0; display: flex; flex-direction: column; max-height: calc(100dvh - 120px); min-height: 640px; }
+.panel h2.title { margin: 0; font-size: 30px; font-weight: 700; letter-spacing: -0.01em; }
+.panel .sub { color: var(--mut); font-size: 15px; margin: 2px 0 12px; }
+.ptabs { flex: 0 0 auto; }
+.ptabs button { font-size: 15px; padding: 11px 4px; }
+.pbody { flex: 1 1 auto; overflow-y: auto; min-height: 0; margin: 12px -22px 0; padding: 0 22px 22px; scrollbar-width: thin; }
+
+/* Window tabs (trip / 200 / 1000) */
+.score { text-align: center; padding-top: 4px; }
+.score .cov { color: var(--mut); font-size: 14px; }
+.score .big { font-size: 84px; font-weight: 700; line-height: 1; letter-spacing: -0.03em; }
+.score .cap { font-size: 22px; font-weight: 600; }
+.score .tag { color: var(--mut); font-size: 15px; margin-top: 2px; }
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+.tile { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; position: relative; min-width: 0; }
+.tile .k { color: var(--mut); font-size: 14px; padding-right: 48px; }
+.tile .v { font-size: 32px; font-weight: 700; margin-top: 2px; line-height: 1.15; }
+.tile .v.txt { font-size: 24px; color: var(--accent-text); }
+.tile .c2 { color: var(--mut); font-size: 13px; margin-top: 2px; }
+.src { position: absolute; right: 10px; top: 10px; font-size: 10px; letter-spacing: 0.08em; padding: 2px 7px; border-radius: 9px; border: 1px solid var(--line); color: var(--mut); }
+.sug { margin-top: 10px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 16px; font-size: 16px; }
+.sug small { display: block; color: var(--mut); font-size: 12px; margin-bottom: 2px; }
+.hint { color: var(--mut); font-size: 13px; margin: 12px 0 0; text-align: center; }
+
+/* Formula Test */
+.result { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 12px 16px 12px; margin-top: 20px; }
+.rhead { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.rhead .lbl { color: var(--mut); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; }
+.rhead .small { color: var(--mut); font-size: 12.5px; }
+.share { margin-top: 12px; }
+.bar { display: flex; gap: 2px; height: 10px; border-radius: 5px; overflow: hidden; background: var(--track); }
+.bar i { display: block; height: 100%; transition: width .2s; }
+.leg { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 10px; font-size: 13px; color: var(--mut); margin-top: 6px; }
+.leg span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.leg b { width: 9px; height: 9px; border-radius: 3px; display: inline-block; }
+.rtop { display: flex; align-items: center; gap: 16px; }
+
+.rtop .meta { min-width: 0; flex: 1; }
+.rating { display: inline-block; font-weight: 600; font-size: 16px; padding: 3px 12px; border-radius: 999px; border: 1px solid currentColor; }
+.rtop .small { color: var(--mut); font-size: 13px; margin-top: 4px; }
+.wbar { display: flex; gap: 2px; height: 12px; border-radius: 6px; overflow: hidden; background: var(--track); margin-top: 10px; }
+.wbar i { display: block; height: 100%; transition: width .2s; }
+.wleg { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 10px; font-size: 12.5px; color: var(--mut); margin-top: 6px; }
+.wleg span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.wleg b { display: inline-block; width: 9px; height: 9px; border-radius: 3px; }
+.eq { font-size: 12px; color: var(--mut); margin-top: 8px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 4px; align-items: center; }
+.toolbar .lbl { color: var(--mut); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; margin-right: 2px; }
+.chip { background: var(--card); border: 1px solid var(--line); color: var(--fg); border-radius: 999px; padding: 6px 12px; font-size: 13px; }
+.chip:hover { border-color: var(--accent-text); }
+
+.inp { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px; margin-top: 12px; }
+.inp .hd { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.inp .nm { font-size: 17px; font-weight: 600; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.inp .dot { width: 10px; height: 10px; border-radius: 3px; flex: 0 0 10px; }
+.inp .val { font-size: 24px; font-weight: 700; white-space: nowrap; }
+.inp .val small { font-size: 13px; font-weight: 500; color: var(--mut); margin-left: 3px; }
+.inp .desc { color: var(--mut); font-size: 13px; margin: 2px 0 6px; }
+.rng { display: grid; grid-template-columns: 1fr; gap: 2px; }
+.scale { display: flex; justify-content: space-between; color: var(--dim); font-size: 11.5px; }
+.sliderrow { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; }
+.wrow { display: grid; grid-template-columns: 74px minmax(0, 1fr) 52px; align-items: center; gap: 10px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); }
+.wrow label { font-size: 13px; color: var(--mut); }
+.wrow output { font-size: 15px; font-weight: 600; text-align: right; }
+.res { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 10px; font-size: 13px; color: var(--mut); align-items: center; }
+.res b { color: var(--fg); font-weight: 600; }
+.st { font-size: 11.5px; padding: 2px 8px; border-radius: 9px; border: 1px solid var(--line); }
+.st.on { color: var(--good); border-color: currentColor; }
+.st.off { color: var(--dim); }
+
+details { margin-top: 12px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 12px 16px; }
+summary { cursor: pointer; font-weight: 600; font-size: 15px; }
+details .inner { display: grid; gap: 4px; margin-top: 8px; }
+.xrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 8px; margin-top: 8px; font-size: 14px; }
+.xrow output { font-weight: 600; }
+.sw { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; font-size: 14px; }
+.sw input { width: 22px; height: 22px; accent-color: var(--accent); }
+.note { color: var(--mut); font-size: 12.5px; margin: 14px 0 0; }
+
+/* sliders */
+input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 28px; background: transparent; margin: 0; --p: 50%; --col: var(--accent); }
+input[type=range]::-webkit-slider-runnable-track { height: 8px; border-radius: 4px; background: linear-gradient(to right, var(--col) var(--p), var(--track) var(--p)); }
+input[type=range]::-moz-range-track { height: 8px; border-radius: 4px; background: var(--track); }
+input[type=range]::-moz-range-progress { height: 8px; border-radius: 4px; background: var(--col); }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 24px; height: 24px; border-radius: 50%; background: #fff; border: 3px solid var(--col); margin-top: -8px; box-shadow: 0 1px 4px rgba(0,0,0,.4); }
+input[type=range]::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%; background: #fff; border: 3px solid var(--col); }
+input[type=range].w { height: 22px; }
+
+[hidden] { display: none !important; }
+
+@media (max-width: 1020px) {
+  .screen { grid-template-columns: minmax(0, 1fr); }
+  .right { order: -1; position: static; }
+  .panel { max-height: none; min-height: 0; }
+  .pbody { overflow: visible; }
+}
+@media (max-width: 560px) {
+  .panel { padding: 16px 14px 0; border-radius: 18px; }
+  .pbody { margin: 12px -14px 0; padding: 0 14px 16px; }
+  .ptabs { display: grid; grid-template-columns: 1fr 1fr; border-radius: 22px; }
+  .rtop .big { font-size: 52px; }
+  .score .big { font-size: 68px; }
+  .opts { gap: 8px; }
+  .opt b { font-size: 17px; }
+  .opt span { font-size: 12px; }
+  .tile .v { font-size: 26px; }
+  .wrow { grid-template-columns: 62px minmax(0, 1fr) 46px; }
+}
+@media (prefers-reduced-motion: reduce) { .wbar i { transition: none; } }
+</style>
+</head>
+<body>
+<div class="status">
+  <span class="num">10:24</span>
+  <span class="r"><span>5G</span><span class="num" id="topTemp">20°C</span></span>
+</div>
+<h1>Vehicle Dynamics</h1>
+
+<div class="screen">
+  <section class="left" aria-label="Vehicle Dynamics">
+    <div class="pills" role="tablist" aria-label="Vehicle Dynamics sections">
+      <button role="tab" data-ltab="dyn" aria-selected="false">Driving Dynamics</button>
+      <button role="tab" data-ltab="adv" aria-selected="false">Advanced Controls</button>
+      <button role="tab" data-ltab="formula" aria-selected="true">Formula Test</button>
+    </div>
+    <div id="lview-dyn" hidden>
+    <div class="group"><h2>Drive Mode</h2><p>Adjusts overall vehicle performance and efficiency.</p>
+      <div class="opts" data-group>
+        <button class="opt"><b>Eco</b><span>Maximum efficiency for longer range</span></button>
+        <button class="opt on"><b>Normal</b><span>Balanced performance for everyday driving</span></button>
+        <button class="opt"><b>Sport</b><span>Dynamic response for an engaging drive</span></button>
+      </div></div>
+    <div class="group"><h2>Steering Feel</h2><p>Adjusts steering weight and response.</p>
+      <div class="opts" data-group>
+        <button class="opt"><b>Soft</b><span>Light steering for easy maneuvering</span></button>
+        <button class="opt on"><b>Comfort</b><span>Balanced feel for daily driving</span></button>
+        <button class="opt"><b>Hard</b><span>Firm steering for more control</span></button>
+      </div></div>
+    <div class="group"><h2>Suspension</h2><p>Controls ride comfort and body movement.</p>
+      <div class="opts" data-group>
+        <button class="opt"><b>Comfort</b><span>A smoother ride for maximum comfort</span></button>
+        <button class="opt on"><b>Normal</b><span>Balanced ride and handling</span></button>
+        <button class="opt"><b>Sport</b><span>Firmer suspension for enhanced control</span></button>
+      </div></div>
+    <div class="dock" aria-hidden="true">
+      <span class="num">‹ 22.0° ›</span>
+      <span class="ic">
+        <svg class="home" viewBox="0 0 24 24"><path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>
+        <svg viewBox="0 0 24 24"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>
+        <svg viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg>
+        <svg viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></svg>
+      </span>
+      <span class="num">‹ 22.0° ›</span>
+    </div>
+    </div>
+    <div id="lview-adv" hidden><p class="note" style="margin-top:22px">Advanced Controls are not part of this simulation. Open Formula Test to change the inputs and weights.</p></div>
+        <div id="lview-formula">
+    <div class="result">
+      <div class="rhead"><span class="lbl">Weights in effect</span><span class="small num" id="dsRaw"></span></div>
+      <div class="wbar" id="wbar" aria-hidden="true"></div>
+      <div class="wleg" id="wleg"></div>
+      <div class="eq" id="eq"></div>
+    </div>
+
+    <div class="toolbar" role="group" aria-label="Example scenarios from the 10 km validation">
+      <span class="lbl">Scenarios</span>
+      <button class="chip" data-sc="0">Eco · mild, flat</button>
+      <button class="chip" data-sc="1">Eco · cold, hilly</button>
+      <button class="chip" data-sc="2">Normal · cold, hilly</button>
+      <button class="chip" data-sc="3">Sporty · mild, hilly</button>
+            <button class="chip" data-sc="4">Aggressive · mild, hilly</button>
+      <button class="chip" id="resetW">Reset weights 60 · 20 · 10 · 10</button>
+    </div>
+
+    <div id="cards"></div>
+
+    <details>
+      <summary>More inputs the formula uses</summary>
+      <div class="inner">
+        <div>
+          <div class="xrow"><label for="x-dist">Distance covered by the data</label><output id="o-dist" class="num"></output></div>
+          <input type="range" id="x-dist" min="1" max="1000" step="1">
+          <div class="scale"><span>1 km</span><span>1000 km</span></div>
+        </div>
+        <div>
+          <div class="xrow"><label for="x-cap">Energy recovered on descents (regen)</label><output id="o-cap" class="num"></output></div>
+          <input type="range" id="x-cap" min="0" max="1" step="0.01">
+          <div class="scale"><span>0% of available</span><span>100%</span></div>
+        </div>
+        <div>
+          <div class="xrow"><label for="x-kap">Climate use versus typical</label><output id="o-kap" class="num"></output></div>
+          <input type="range" id="x-kap" min="0.6" max="1.6" step="0.01">
+          <div class="scale"><span>0.6× lower</span><span>1.6× higher</span></div>
+        </div>
+        <label class="sw" for="x-conf"><span>Scale weights by data confidence, as in the validation script (off: weights apply exactly as set)</span><input type="checkbox" id="x-conf"></label>
+      </div>
+    </details>
+    <p class="note">Sub-scores follow the 10 km validation script. Speed is taken as 50 km/h average, vehicle 1950 kg, climb equals descent. The ESP slider is the typical peak acceleration of a manoeuvre; the sub-score interpolates the ECO, Normal, Sporty and Aggressive band values.</p>
+        </div>
+  </section>
+
+  <section class="right" aria-label="Driving Insights">
+    <div class="panel">
+      <h2 class="title">Driving Insights</h2>
+      <div class="sub">See how your driving style affects efficiency and range.</div>
+      <div class="pills ptabs" role="tablist" aria-label="Driving Insights windows">
+        <button role="tab" id="tab-trip" data-tab="trip" aria-selected="true">Current Trip</button>
+        <button role="tab" id="tab-w200" data-tab="w200" aria-selected="false">Last 200 km</button>
+        <button role="tab" id="tab-w1000" data-tab="w1000" aria-selected="false">Last 1000 km</button>
+      </div>
+
+      <div class="pbody">
+        <!-- Window views -->
+        <div id="view-win">
+          <div class="score">
+            <div class="cov num" id="wCov"></div>
+            <div class="big num" id="wScore">0</div>
+            <div class="cap" id="wCap">Drive Score</div>
+            <div class="tag" id="wTag"></div>
+          </div>
+          <div class="share"><div class="bar" id="bandBar" aria-hidden="true"></div><div class="leg" id="bandLeg"></div></div>
+          <div class="tiles">
+            <div class="tile"><span class="src">BMS</span><div class="k">Battery</div><div class="v num">82%</div><div class="c2">Last 2 Sessions Used DC Fast Charging</div></div>
+            <div class="tile"><span class="src">BMS</span><div class="k">Estimated Range</div><div class="v num" id="tRange">0 km</div><div class="c2">Based on current driving style</div></div>
+            <div class="tile"><span class="src">BMS</span><div class="k">Driving Efficiency</div><div class="v num" id="tEff">0%</div><div class="c2 num" id="tEffS"></div></div>
+            <div class="tile"><span class="src">IMU</span><div class="k">Driving Style</div><div class="v txt" id="tStyle"></div><div class="c2 num" id="tStyleS"></div></div>
+          </div>
+          <div class="sug"><small>Suggestion</small><span id="wSug"></span></div>
+          <p class="hint" id="wHint">These windows use the sliders from the Formula Test tab as the average over the window.</p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var clamp = function (x, a, b) { return Math.max(a, Math.min(b, x)); };
+  var lerp = function (t, a, b) { return a + (b - a) * t; };
+  var M = 1950, G = 9.81, ETA = 0.88, SPEED = 50;
+
+  function pAux(T) { return T >= 20 ? 0.6 + 0.05 * (T - 20) : lerp(clamp((20 - T) / 30, 0, 1), 0.6, 2.2); }
+  function fT(T) { return lerp(clamp((10 - T) / 20, 0, 1), 1.0, 1.10); }
+  function etaR(T) { return lerp(clamp((10 - T) / 20, 0, 1), 0.75, 0.45); }
+
+  var PTS = [[0.05, 100], [0.15, 80], [0.25, 45], [0.35, 0]];
+  function sEsp(a) {
+    if (a <= PTS[0][0]) return 100;
+    for (var i = 1; i < PTS.length; i++) {
+      if (a <= PTS[i][0]) { var p = PTS[i - 1], q = PTS[i]; return lerp((a - p[0]) / (q[0] - p[0]), p[1], q[1]); }
+    }
+    return 0;
+  }
+  function shares(a) {
+    var m = [0.05, 0.15, 0.25, 0.35], o = [0, 0, 0, 0];
+    if (a <= m[0]) { o[0] = 1; return o; }
+    if (a >= m[3]) { o[3] = 1; return o; }
+    for (var i = 0; i < 3; i++) if (a < m[i + 1]) { var t = (a - m[i]) / 0.10; o[i] = 1 - t; o[i + 1] = t; return o; }
+    return o;
+  }
+  function bandOf(a) { return a < 0.10 ? "ECO" : a < 0.20 ? "Normal" : a < 0.30 ? "Sporty" : "Aggressive"; }
+  function ratingOf(s) { return s >= 90 ? "Excellent" : s >= 80 ? "Good" : s >= 60 ? "Balanced" : "Needs Improvement"; }
+  function ratingColor(s) { return s >= 90 ? "var(--good)" : s >= 80 ? "var(--c-esp)" : s >= 60 ? "var(--warn)" : "var(--bad)"; }
+
+  var KEYS = ["esp", "bms", "tmp", "ter"];
+  var DEF = {
+    esp: { name: "ESP acceleration", tag: "ESP", col: "var(--c-esp)", color: "#3b8bff" },
+    bms: { name: "BMS consumption", tag: "BMS", col: "var(--c-bms)" },
+    tmp: { name: "Outside temperature", tag: "TEMP", col: "var(--c-tmp)" },
+    ter: { name: "Terrain slopes", tag: "SLOPE", col: "var(--c-ter)" }
+  };
+
+  var S = {
+    acc: 0.15, cons: 15.4, temp: 20, hill: 0,
+    dist: 10, cap: 0.55, kappa: 1.0, conf: false,
+    W: { esp: 60, bms: 20, tmp: 10, ter: 10 },
+    tab: "trip", ltab: "formula"
+  };
+  var SCEN = [
+    { acc: 0.07, cons: 11.2, temp: 20, hill: 0, cap: 0.80, kappa: 0.85 },
+    { acc: 0.07, cons: 22.3, temp: -5, hill: 14, cap: 0.80, kappa: 0.85 },
+    { acc: 0.15, cons: 28.2, temp: -5, hill: 14, cap: 0.55, kappa: 1.00 },
+    { acc: 0.24, cons: 26.5, temp: 20, hill: 14, cap: 0.43, kappa: 1.02 },
+    { acc: 0.30, cons: 32.2, temp: 20, hill: 14, cap: 0.30, kappa: 1.05 }
+  ];
+
+  function compute(st, d) {
+    var T = st.temp, th = d / SPEED;
+    var eMeas = st.cons * d / 100;
+    var eAux = st.kappa * pAux(T) * th;
+    var h = st.hill * d;
+    var eRegen = st.cap * M * G * ETA * etaR(T) * h / 3.6e6;
+    var sE = sEsp(st.acc);
+    // BMS: remove climate extra and grade energy, divide by cold factor
+    var auxExc = eAux - pAux(20) * th;
+    var eRec = eRegen > 0 ? eRegen : M * G * ETA * etaR(T) * h / 3.6e6;
+    var eGrade = M * G * h / ETA / 3.6e6 - eRec;
+    var eNorm = (eMeas - auxExc - eGrade) / d * 100 / fT(T);
+    var sB = 100 * clamp((24 - eNorm) / 14, 0, 1);
+    // Temperature
+    var dev = Math.abs(pAux(T) - pAux(20)) * th / d * 100;
+    var tAct = dev >= 0.3 && eAux > 0;
+    var kappa = eAux / (pAux(T) * th);
+    var sT = tAct ? clamp(75 - 250 * (kappa - 1), 0, 100) : 75;
+    // Terrain
+    var rAct = h >= 30;
+    var avail = M * G * ETA * etaR(T) * h / 3.6e6;
+    var sR = rAct && avail > 0 ? clamp(100 * (eRegen / avail) / 0.8, 0, 100) : 70;
+    var Ssub = { esp: sE, bms: sB, tmp: sT, ter: sR };
+    var c = { esp: 1, bms: clamp(d / 30, 0.2, 1), tmp: tAct ? 1 : 0.2, ter: rAct ? 0.8 : 0.2 };
+    var w = {}, tot = 0;
+    KEYS.forEach(function (k) { w[k] = st.W[k] * (st.conf ? c[k] : 1); tot += w[k]; });
+    KEYS.forEach(function (k) { w[k] /= tot; });
+    var ds = 0; KEYS.forEach(function (k) { ds += w[k] * Ssub[k]; });
+    var iRaw = 100 * clamp((24 - st.cons) / 14, 0, 1);
+    return { S: Ssub, c: c, w: w, ds: ds, eNorm: eNorm, rawDs: 0.8 * sE + 0.2 * iRaw, act: { tmp: tAct, ter: rAct }, d: d, eRegen: eRegen };
+  }
+
+  // ---------- weights: keep sum 100, each >= 1
+  function setWeight(key, v) {
+    v = clamp(Math.round(v), 1, 97);
+    var others = KEYS.filter(function (k) { return k !== key; });
+    var sumO = others.reduce(function (a, k) { return a + S.W[k]; }, 0);
+    var rest = 100 - v, nw = {}, s = 0;
+    others.forEach(function (k) { nw[k] = Math.max(1, Math.round(S.W[k] / sumO * rest)); s += nw[k]; });
+    var diff = rest - s;
+    while (diff !== 0) {
+      var big = others.slice().sort(function (a, b) { return diff > 0 ? nw[a] - nw[b] : nw[b] - nw[a]; })[0];
+      if (diff < 0 && nw[big] <= 1) break;
+      nw[big] += diff > 0 ? 1 : -1; diff += diff > 0 ? -1 : 1;
+    }
+    others.forEach(function (k) { S.W[k] = nw[k]; });
+    S.W[key] = v;
+  }
+
+  // ---------- DOM
+  var $ = function (id) { return document.getElementById(id); };
+  var CFG = {
+    esp: { id: "esp", min: 0.03, max: 0.40, step: 0.005, get: function () { return S.acc; }, set: function (v) { S.acc = v; } },
+    bms: { id: "bms", min: 8, max: 40, step: 0.1, get: function () { return S.cons; }, set: function (v) { S.cons = v; } },
+    tmp: { id: "tmp", min: -20, max: 40, step: 1, get: function () { return S.temp; }, set: function (v) { S.temp = v; } },
+    ter: { id: "ter", min: 0, max: 50, step: 1, get: function () { return S.hill; }, set: function (v) { S.hill = v; } }
+  };
+  var DESC = {
+    esp: "Typical peak acceleration of a manoeuvre, from the ESP accelerometer.",
+    bms: "Measured battery consumption over the window, before any correction.",
+    tmp: "Outside temperature from the vehicle sensor.",
+    ter: "Climb per km along the route (descent equals climb). 10 m/km is about 1% average grade."
+  };
+  var SCALE = {
+    esp: ["0.03 g", "0.40 g"], bms: ["8", "40 kWh/100 km"], tmp: ["−20 °C", "40 °C"], ter: ["0 m/km flat", "50 m/km"]
+  };
+
+  function fill(el) { el.style.setProperty("--p", ((el.value - el.min) / (el.max - el.min) * 100) + "%"); }
+
+  function buildCards() {
+    var html = "";
+    KEYS.forEach(function (k) {
+      var d = DEF[k], c = CFG[k];
+      html += '<div class="inp" id="card-' + k + '">' +
+        '<div class="hd"><div class="nm"><span class="dot" style="background:' + d.col + '"></span><label for="in-' + k + '">' + d.name + '</label></div>' +
+        '<div class="val num" id="val-' + k + '"></div></div>' +
+        '<div class="desc">' + DESC[k] + '</div>' +
+        '<div class="rng"><input type="range" id="in-' + k + '" min="' + c.min + '" max="' + c.max + '" step="' + c.step + '" style="--col:' + d.col + '">' +
+        '<div class="scale"><span>' + SCALE[k][0] + '</span><span>' + SCALE[k][1] + '</span></div></div>' +
+        '<div class="wrow"><label for="w-' + k + '">Weight</label>' +
+        '<input class="w" type="range" id="w-' + k + '" min="1" max="97" step="1" style="--col:' + d.col + '"><output class="num" id="wo-' + k + '"></output></div>' +
+        '<div class="res" id="res-' + k + '"></div></div>';
+    });
+    $("cards").innerHTML = html;
+    KEYS.forEach(function (k) {
+      $("in-" + k).addEventListener("input", function (e) { CFG[k].set(parseFloat(e.target.value)); render(); });
+      $("w-" + k).addEventListener("input", function (e) { setWeight(k, parseFloat(e.target.value)); render(); });
+    });
+  }
+
+  function fmtVal(k) {
+    if (k === "esp") return S.acc.toFixed(3) + "<small>g · " + bandOf(S.acc) + "</small>";
+    if (k === "bms") return S.cons.toFixed(1) + "<small>kWh/100 km</small>";
+    if (k === "tmp") return String(S.temp).replace("-", "−") + "<small>°C</small>";
+    return S.hill + "<small>m/km · ≈" + (S.hill / 10).toFixed(1) + "% grade</small>";
+  }
+
+  function pts(x) { return (x >= 0 ? "+" : "") + x.toFixed(1); }
+
+  function render() {
+    // inputs
+    KEYS.forEach(function (k) {
+      var el = $("in-" + k); if (!el) return;
+      el.value = CFG[k].get(); fill(el);
+      var wv = $("w-" + k); wv.value = S.W[k]; fill(wv);
+      $("wo-" + k).textContent = S.W[k] + "%";
+      $("val-" + k).innerHTML = fmtVal(k);
+    });
+    $("x-dist").value = S.dist; fill($("x-dist")); $("o-dist").textContent = S.dist + " km";
+    $("x-cap").value = S.cap; fill($("x-cap")); $("o-cap").textContent = Math.round(S.cap * 100) + "%";
+    $("x-kap").value = S.kappa; fill($("x-kap")); $("o-kap").textContent = S.kappa.toFixed(2) + "×";
+    $("x-conf").checked = S.conf;
+    $("topTemp").textContent = String(S.temp).replace("-", "−") + "°C";
+
+    var r = compute(S, S.dist);
+    // result header
+    var delta = r.ds - r.rawDs;
+    $("dsRaw").textContent = "v1.0 style without normalisation: " + r.rawDs.toFixed(0) + " (" + (delta >= 0 ? "+" : "−") + Math.abs(delta).toFixed(0) + ")";
+    $("wbar").innerHTML = KEYS.map(function (k) { return '<i style="width:' + (r.w[k] * 100).toFixed(2) + '%;background:' + DEF[k].col + '"></i>'; }).join("");
+    $("wleg").innerHTML = KEYS.map(function (k) { return '<span><b style="background:' + DEF[k].col + '"></b>' + DEF[k].tag + " " + Math.round(r.w[k] * 100) + "%</span>"; }).join("");
+    $("eq").textContent = "Score = " + KEYS.map(function (k) { return r.w[k].toFixed(2) + "×" + r.S[k].toFixed(0); }).join(" + ") + " = " + r.ds.toFixed(1);
+
+    // per-card results
+    var e = r.eNorm;
+    $("res-esp").innerHTML = '<span>Sub-score <b class="num">' + r.S.esp.toFixed(0) + '</b></span><span>Weight <b class="num">' + S.W.esp + '% → ' + (r.w.esp * 100).toFixed(0) + '%</b></span><span>Adds <b class="num">' + pts(r.w.esp * r.S.esp) + ' pts</b></span>';
+    $("res-bms").innerHTML = '<span>Normalised <b class="num">' + e.toFixed(1) + ' kWh/100 km</b></span><span>Sub-score <b class="num">' + r.S.bms.toFixed(0) + '</b></span><span>Weight <b class="num">' + S.W.bms + '% → ' + (r.w.bms * 100).toFixed(0) + '%</b></span><span>Adds <b class="num">' + pts(r.w.bms * r.S.bms) + ' pts</b></span><span class="st ' + (r.c.bms >= 1 ? "on" : "off") + '">confidence ' + Math.round(r.c.bms * 100) + '% at ' + S.dist + ' km</span>';
+    $("res-tmp").innerHTML = '<span class="st ' + (r.act.tmp ? "on" : "off") + '">' + (r.act.tmp ? "Active" : "Neutral, little climate load") + '</span><span>Sub-score <b class="num">' + r.S.tmp.toFixed(0) + '</b></span><span>Weight <b class="num">' + S.W.tmp + '% → ' + (r.w.tmp * 100).toFixed(0) + '%</b></span><span>Adds <b class="num">' + pts(r.w.tmp * r.S.tmp) + ' pts</b></span>';
+    $("res-ter").innerHTML = '<span class="st ' + (r.act.ter ? "on" : "off") + '">' + (r.act.ter ? "Active" : "Neutral, under 30 m of descent") + '</span><span>Sub-score <b class="num">' + r.S.ter.toFixed(0) + '</b></span><span>Weight <b class="num">' + S.W.ter + '% → ' + (r.w.ter * 100).toFixed(0) + '%</b></span><span>Adds <b class="num">' + pts(r.w.ter * r.S.ter) + ' pts</b></span>';
+
+    renderWindow();
+  }
+
+  function renderWindow() {
+    var d = S.tab === "trip" ? S.dist : S.tab === "w200" ? 200 : 1000;
+    var r = compute(S, d);
+    $("wCov").textContent = d + " km" + (S.tab === "trip" ? " · " + Math.round(d / SPEED * 60) + " min" : "");
+    var sh = shares(S.acc), nm = ["ECO", "Normal", "Sporty", "Aggressive"], cl = ["var(--good)", "var(--c-nor)", "var(--warn)", "var(--bad)"];
+    $("bandBar").innerHTML = sh.map(function (v, i) { return '<i style="width:' + (v * 100).toFixed(1) + '%;background:' + cl[i] + '"></i>'; }).join("");
+    $("bandLeg").innerHTML = sh.map(function (v, i) { return '<span><b style="background:' + cl[i] + '"></b>' + nm[i] + " " + Math.round(v * 100) + "%</span>"; }).join("");
+    $("wScore").textContent = Math.round(r.ds);
+    $("wTag").textContent = ratingOf(r.ds) + ". " + (r.ds >= 80 ? "A smoother, more efficient drive." : r.ds >= 60 ? "A mix of smooth and firm driving." : "Room to drive more smoothly.");
+    $("tEff").textContent = Math.round(r.S.bms) + "%";
+    $("tEffS").textContent = r.eNorm.toFixed(1) + " kWh/100 km in standard conditions";
+    var pack = 75 * 0.82;
+    $("tRange").textContent = Math.round(pack / S.cons * 100) + " km";
+    var band = bandOf(S.acc);
+    $("tStyle").textContent = band === "ECO" ? "Efficient Driver" : band === "Normal" ? "Balanced Driver" : "Dynamic Driver";
+    $("tStyleS").textContent = "Typical peak " + S.acc.toFixed(2) + " g · " + band + " band";
+    var low = KEYS.slice().sort(function (a, b) { return r.S[a] - r.S[b]; })[0];
+    var tips = {
+      esp: "Smoother acceleration and braking moves more manoeuvres into the ECO band.",
+      bms: "Consumption is high for these conditions. Keep speed steadier and anticipate traffic.",
+      tmp: "Cabin climate use is above typical. Seat heating or a lower fan speed can save range.",
+      ter: "Little energy is recovered on descents. Lift off earlier and let regen slow the car."
+    };
+    $("wSug").textContent = r.ds >= 90 ? "Excellent. Keep this driving style." : tips[low];
+    $("wHint").textContent = S.tab === "trip" ? "Driven by the Formula Test sliders on the left." : "Window average of the Formula Test inputs. Longer windows give the BMS full weight.";
+  }
+
+  function setTab(t) {
+    S.tab = t;
+    document.querySelectorAll("[data-tab]").forEach(function (b) { b.setAttribute("aria-selected", b.dataset.tab === t ? "true" : "false"); });
+    render();
+  }
+  function setLTab(t) {
+    S.ltab = t;
+    document.querySelectorAll("[data-ltab]").forEach(function (b) { b.setAttribute("aria-selected", b.dataset.ltab === t ? "true" : "false"); });
+    $("lview-dyn").hidden = t !== "dyn";
+    $("lview-adv").hidden = t !== "adv";
+    $("lview-formula").hidden = t !== "formula";
+  }
+
+  // ---------- events
+  document.querySelectorAll("[data-tab]").forEach(function (b) { b.addEventListener("click", function () { setTab(b.dataset.tab); }); });
+  document.querySelectorAll("[data-ltab]").forEach(function (b) { b.addEventListener("click", function () { setLTab(b.dataset.ltab); }); });
+  document.querySelectorAll("[data-group]").forEach(function (g) {
+    g.addEventListener("click", function (e) {
+      var b = e.target.closest(".opt"); if (!b) return;
+      g.querySelectorAll(".opt").forEach(function (o) { o.classList.toggle("on", o === b); });
+    });
+  });
+  document.querySelectorAll("[data-sc]").forEach(function (b) {
+    b.addEventListener("click", function () { var s = SCEN[+b.dataset.sc]; for (var k in s) S[k] = s[k]; render(); });
+  });
+  $("x-dist").addEventListener("input", function (e) { S.dist = parseInt(e.target.value, 10); render(); });
+  $("x-cap").addEventListener("input", function (e) { S.cap = parseFloat(e.target.value); render(); });
+  $("x-kap").addEventListener("input", function (e) { S.kappa = parseFloat(e.target.value); render(); });
+  $("x-conf").addEventListener("change", function (e) { S.conf = e.target.checked; render(); });
+  $("resetW").addEventListener("click", function () { S.W = { esp: 60, bms: 20, tmp: 10, ter: 10 }; S.conf = false; render(); });
+
+  buildCards();
+  setLTab("formula");
+  render();
+})();
+</script>
+</body>
+</html>
